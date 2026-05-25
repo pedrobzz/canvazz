@@ -55,3 +55,58 @@ export interface PageModel {
   /** Top-level node ids (artboards and free-floating nodes) in z-order. */
   children: NodeId[]
 }
+
+export interface ComponentDef {
+  id: string
+  name: string
+  /** Root node of the main component subtree (lives in doc.nodes). */
+  rootId: NodeId
+  /** Component set this def belongs to, when it is a variant. */
+  setId?: string
+  /** Variant properties, e.g. { state: "hover" }. */
+  variantProps?: Record<string, string>
+}
+
+export interface ComponentSetModel {
+  id: string
+  name: string
+  /** Component ids that are variants of this set. */
+  variantIds: string[]
+  defaultVariantId: string
+}
+
+export interface AssetModel {
+  id: string
+  name: string
+  mime: string
+  size: number
+  /** data: URL or app-served URL. Stable reference used from node attrs. */
+  url: string
+}
+
+export interface CommentModel {
+  id: string
+  nodeId: NodeId | null
+  /** World coordinates of the comment pin. */
+  x: number
+  y: number
+  author: string
+  body: string
+  createdAt: number
+  resolved: boolean
+}
+
+export interface DocumentModel {
+  id: string
+  name: string
+  schemaVersion: number
+  pages: PageModel[]
+  activePageId: string
+  nodes: Record<NodeId, NodeModel>
+  components: Record<string, ComponentDef>
+  componentSets: Record<string, ComponentSetModel>
+  /** Design tokens exposed as CSS custom properties on the canvas root. */
+  tokens: Record<string, string>
+  assets: Record<string, AssetModel>
+  comments: CommentModel[]
+}
