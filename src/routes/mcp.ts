@@ -1,3 +1,6 @@
+// Side-effect import: registers the `server.handlers` route-option module
+// augmentation from @tanstack/start-client-core.
+import '@tanstack/react-start'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { createFileRoute } from '@tanstack/react-router'
 import z from 'zod'
