@@ -92,3 +92,24 @@ class Draft {
     throw new Error(`Node ${id} not attached to any page`)
   }
 }
+
+export function collectSubtree(doc: DocumentModel, rootId: NodeId): NodeModel[] {
+  const out: NodeModel[] = []
+  const walk = (id: NodeId) => {
+    const node = doc.nodes[id]
+    if (!node) throw new Error(`Unknown node: ${id}`)
+    out.push(node)
+    node.children.forEach(walk)
+  }
+  walk(rootId)
+  return out
+}
+
+export function isAncestor(doc: DocumentModel, maybeAncestor: NodeId, id: NodeId): boolean {
+  let cur = doc.nodes[id]?.parent ?? null
+  while (cur) {
+    if (cur === maybeAncestor) return true
+    cur = doc.nodes[cur]?.parent ?? null
+  }
+  return false
+}
