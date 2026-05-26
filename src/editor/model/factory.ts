@@ -126,3 +126,56 @@ export function createStar(box: Box): NodeModel {
     style: { ...absoluteBox(box), 'background-color': '#d9d9d9', 'clip-path': starClipPath() },
   })
 }
+
+export function createText(x: number, y: number, text = 'Text'): NodeModel {
+  return base({
+    name: text.slice(0, 24) || 'Text',
+    tag: 'p',
+    text,
+    style: {
+      position: 'absolute',
+      left: `${round(x)}px`,
+      top: `${round(y)}px`,
+      'font-size': '16px',
+      'line-height': '1.4',
+      color: '#000000',
+      margin: '0',
+      'white-space': 'pre-wrap',
+      'max-width': 'max-content',
+    },
+  })
+}
+
+/** Deep-clone a subtree with fresh ids. Returns all nodes plus the new root id. */
+export function cloneSubtree(
+  nodes: Record<string, NodeModel>,
+  rootId: string,
+  idMap: Map<string, string> = new Map(),
+): { nodes: NodeModel[]; rootId: string; idMap: Map<string, string> } {
+  const out: NodeModel[] = []
+  const cloneNode = (id: string, parentNewId: string | null): string => {
+    const src = nodes[id]
+    if (!src) throw new Error(`Unknown node: ${id}`)
+    const newId = genId()
+    idMap.set(id, newId)
+    const clone: NodeModel = {
+      ...src,
+      id: newId,
+      parent: parentNewId,
+      attrs: { ...src.attrs },
+      style: { ...src.style },
+      classes: [...src.classes],
+      children: [],
+      overrides: src.overrides
+        ? Object.fromEntries(Object.entries(src.overrides).map(([k, v]) => [k, { ...v }]))
+        : undefined,
+    }
+    // A copy of a main component is a plain subtree, not a second definition.
+    delete clone.isComponentRoot
+    out.push(clone)
+    clone.children = src.children.map((c) => cloneNode(c, newId))
+    return newId
+  }
+  const newRootId = cloneNode(rootId, null)
+  return { nodes: out, rootId: newRootId, idMap }
+}
