@@ -113,3 +113,165 @@ export function isAncestor(doc: DocumentModel, maybeAncestor: NodeId, id: NodeId
   }
   return false
 }
+
+function applyOp(draft: Draft, op: Op): Op {
+  switch (op.t) {
+    case 'insertTree': {
+      for (const node of op.nodes) {
+        if (draft.doc.nodes[node.id]) throw new Error(`Node already exists: ${node.id}`)
+      }
+      for (const node of op.nodes) {
+        draft.doc.nodes[node.id] = node
+        draft.changed.add(node.id)
+      }
+      const root = draft.node(op.rootId)
+      root.parent = op.at.kind === 'page' ? null : op.at.parent
+      const container = draft.container(op.at)
+      container.splice(Math.max(0, Math.min(op.at.index, container.length)), 0, op.rootId)
+      return { t: 'remove', id: op.rootId }
+    }
+    case 'remove': {
+      const at = draft.locate(op.id)
+      const nodes = collectSubtree(draft.doc, op.id)
+      const container = draft.container(at)
+      container.splice(container.indexOf(op.id), 1)
+      for (const node of nodes) {
+        delete draft.doc.nodes[node.id]
+        draft.changed.add(node.id)
+      }
+      return { t: 'insertTree', nodes, rootId: op.id, at }
+    }
+    case 'move': {
+      if (op.to.kind === 'node') {
+        if (op.to.parent === op.id || isAncestor(draft.doc, op.id, op.to.parent)) {
+          throw new Error(`Cannot move ${op.id} into its own subtree`)
+        }
+      }
+      const from = draft.locate(op.id)
+      const fromContainer = draft.container(from)
+      fromContainer.splice(fromContainer.indexOf(op.id), 1)
+      const node = draft.node(op.id)
+      node.parent = op.to.kind === 'page' ? null : op.to.parent
+      const toContainer = draft.container(op.to)
+      toContainer.splice(Math.max(0, Math.min(op.to.index, toContainer.length)), 0, op.id)
+      if (from.kind === 'node') draft.changed.add(from.parent)
+      if (op.to.kind === 'node') draft.changed.add(op.to.parent)
+      return { t: 'move', id: op.id, to: from }
+    }
+    case 'setProps': {
+      const node = draft.node(op.id)
+      // Generic key-by-key patch with capture of previous values for undo.
+      const record = node as unknown as Record<string, unknown>
+      const prev: Record<string, unknown> = {}
+      for (const key of Object.keys(op.patch) as (keyof NodePropsPatch)[]) {
+        prev[key] = record[key] ?? null
+        const value = op.patch[key]
+        if (value === null || value === undefined) delete record[key]
+        else record[key] = value
+      }
+      return { t: 'setProps', id: op.id, patch: prev as NodePropsPatch }
+    }
+    case 'setStyle': {
+      const node = draft.node(op.id)
+      const prev: Record<string, string | null> = {}
+      for (const [key, value] of Object.entries(op.set)) {
+        prev[key] = node.style[key] ?? null
+        if (value === null) delete node.style[key]
+        else node.style[key] = value
+      }
+      return { t: 'setStyle', id: op.id, set: prev }
+    }
+    case 'setClasses': {
+      const node = draft.node(op.id)
+      const prev = node.classes
+      node.classes = [...op.classes]
+      return { t: 'setClasses', id: op.id, classes: prev }
+    }
+    case 'setAttrs': {
+      const node = draft.node(op.id)
+      const prev: Record<string, string | null> = {}
+      for (const [key, value] of Object.entries(op.set)) {
+        prev[key] = node.attrs[key] ?? null
+        if (value === null) delete node.attrs[key]
+        else node.attrs[key] = value
+      }
+      return { t: 'setAttrs', id: op.id, set: prev }
+    }
+    case 'setOverride': {
+      const node = draft.node(op.id)
+      const prevPatch: NodeOverride | null = node.overrides?.[op.sourceId] ?? null
+      if (!node.overrides) node.overrides = {}
+      if (op.patch === null) delete node.overrides[op.sourceId]
+      else node.overrides[op.sourceId] = { ...node.overrides[op.sourceId], ...op.patch }
+      return { t: 'setOverride', id: op.id, sourceId: op.sourceId, patch: prevPatch }
+    }
+    case 'defineComponent': {
+      const prev = draft.doc.components[op.def.id]
+      draft.doc.components = { ...draft.doc.components, [op.def.id]: op.def }
+      draft.changed.add(op.def.rootId)
+      return prev ? { t: 'defineComponent', def: prev } : { t: 'removeComponent', id: op.def.id }
+    }
+    case 'removeComponent': {
+      const prev = draft.doc.components[op.id]
+      if (!prev) throw new Error(`Unknown component: ${op.id}`)
+      const next = { ...draft.doc.components }
+      delete next[op.id]
+      draft.doc.components = next
+      return { t: 'defineComponent', def: prev }
+    }
+    case 'defineComponentSet': {
+      const prev = draft.doc.componentSets[op.set.id]
+      draft.doc.componentSets = { ...draft.doc.componentSets, [op.set.id]: op.set }
+      return prev
+        ? { t: 'defineComponentSet', set: prev }
+        : // A set with no variants is inert; good enough as an inverse.
+          { t: 'defineComponentSet', set: { ...op.set, variantIds: [] } }
+    }
+    case 'setToken': {
+      const prev = draft.doc.tokens[op.name] ?? null
+      const next = { ...draft.doc.tokens }
+      if (op.value === null) delete next[op.name]
+      else next[op.name] = op.value
+      draft.doc.tokens = next
+      return { t: 'setToken', name: op.name, value: prev }
+    }
+    case 'addPage': {
+      const pages = draft.pages()
+      pages.splice(Math.max(0, Math.min(op.index, pages.length)), 0, op.page)
+      return { t: 'removePage', id: op.page.id }
+    }
+    case 'removePage': {
+      const pages = draft.pages()
+      const index = pages.findIndex((p) => p.id === op.id)
+      if (index < 0) throw new Error(`Unknown page: ${op.id}`)
+      const [page] = pages.splice(index, 1)
+      if (page.children.length > 0) throw new Error(`Page ${op.id} is not empty`)
+      if (draft.doc.activePageId === op.id) draft.doc.activePageId = pages[0]?.id ?? ''
+      return { t: 'addPage', page, index }
+    }
+    case 'setPageName': {
+      const page = draft.page(op.id)
+      const prev = page.name
+      page.name = op.name
+      return { t: 'setPageName', id: op.id, name: prev }
+    }
+    case 'addAsset': {
+      draft.doc.assets = { ...draft.doc.assets, [op.asset.id]: op.asset }
+      // Assets are content-addressed blobs; undo keeps them (harmless, stable refs).
+      return { t: 'addAsset', asset: op.asset }
+    }
+    case 'addComment': {
+      draft.doc.comments = [...draft.doc.comments, op.comment]
+      return { t: 'setComment', id: op.comment.id, patch: { resolved: true } }
+    }
+    case 'setComment': {
+      const index = draft.doc.comments.findIndex((c) => c.id === op.id)
+      if (index < 0) throw new Error(`Unknown comment: ${op.id}`)
+      const prev = draft.doc.comments[index]
+      const comments = [...draft.doc.comments]
+      comments[index] = { ...prev, ...op.patch }
+      draft.doc.comments = comments
+      return { t: 'setComment', id: op.id, patch: { body: prev.body, resolved: prev.resolved } }
+    }
+  }
+}
