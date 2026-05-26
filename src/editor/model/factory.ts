@@ -69,3 +69,60 @@ export function createRectangle(box: Box): NodeModel {
     style: { ...absoluteBox(box), 'background-color': '#d9d9d9' },
   })
 }
+
+export function createEllipse(box: Box): NodeModel {
+  return base({
+    name: 'Ellipse',
+    tag: 'div',
+    style: { ...absoluteBox(box), 'background-color': '#d9d9d9', 'border-radius': '9999px' },
+  })
+}
+
+/** A line is a thin div: length = width, stroke = height, angle = rotate. */
+export function createLine(x: number, y: number, length: number, angleDeg: number): NodeModel {
+  return base({
+    name: 'Line',
+    tag: 'div',
+    style: {
+      ...absoluteBox({ x, y, width: length, height: 2 }),
+      'background-color': '#000000',
+      rotate: `${round(angleDeg)}deg`,
+      'transform-origin': '0% 50%',
+    },
+  })
+}
+
+export function polygonClipPath(sides: number): string {
+  const pts: string[] = []
+  for (let i = 0; i < sides; i++) {
+    const angle = (Math.PI * 2 * i) / sides - Math.PI / 2
+    pts.push(`${round(50 + 50 * Math.cos(angle))}% ${round(50 + 50 * Math.sin(angle))}%`)
+  }
+  return `polygon(${pts.join(', ')})`
+}
+
+export function starClipPath(points = 5, innerRatio = 0.4): string {
+  const pts: string[] = []
+  for (let i = 0; i < points * 2; i++) {
+    const radius = i % 2 === 0 ? 50 : 50 * innerRatio
+    const angle = (Math.PI * i) / points - Math.PI / 2
+    pts.push(`${round(50 + radius * Math.cos(angle))}% ${round(50 + radius * Math.sin(angle))}%`)
+  }
+  return `polygon(${pts.join(', ')})`
+}
+
+export function createPolygon(box: Box, sides = 3): NodeModel {
+  return base({
+    name: 'Polygon',
+    tag: 'div',
+    style: { ...absoluteBox(box), 'background-color': '#d9d9d9', 'clip-path': polygonClipPath(sides) },
+  })
+}
+
+export function createStar(box: Box): NodeModel {
+  return base({
+    name: 'Star',
+    tag: 'div',
+    style: { ...absoluteBox(box), 'background-color': '#d9d9d9', 'clip-path': starClipPath() },
+  })
+}
