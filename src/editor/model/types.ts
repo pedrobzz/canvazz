@@ -110,3 +110,58 @@ export interface DocumentModel {
   assets: Record<string, AssetModel>
   comments: CommentModel[]
 }
+
+/** Where a node lives: under another node, or at the top level of a page. */
+export type NodeLocation =
+  | { kind: 'node'; parent: NodeId; index: number }
+  | { kind: 'page'; pageId: string; index: number }
+
+/**
+ * Operations. Every mutation is an Op; applying an Op returns its inverse so
+ * transactions are undoable by construction.
+ */
+export type Op =
+  | { t: 'insertTree'; nodes: NodeModel[]; rootId: NodeId; at: NodeLocation }
+  | { t: 'remove'; id: NodeId }
+  | { t: 'move'; id: NodeId; to: NodeLocation }
+  | { t: 'setProps'; id: NodeId; patch: NodePropsPatch }
+  | { t: 'setStyle'; id: NodeId; set: Record<string, string | null> }
+  | { t: 'setClasses'; id: NodeId; classes: string[] }
+  | { t: 'setAttrs'; id: NodeId; set: Record<string, string | null> }
+  | { t: 'setOverride'; id: NodeId; sourceId: NodeId; patch: NodeOverride | null }
+  | { t: 'defineComponent'; def: ComponentDef }
+  | { t: 'removeComponent'; id: string }
+  | { t: 'defineComponentSet'; set: ComponentSetModel }
+  | { t: 'setToken'; name: string; value: string | null }
+  | { t: 'addPage'; page: PageModel; index: number }
+  | { t: 'removePage'; id: string }
+  | { t: 'setPageName'; id: string; name: string }
+  | { t: 'addAsset'; asset: AssetModel }
+  | { t: 'addComment'; comment: CommentModel }
+  | { t: 'setComment'; id: string; patch: Partial<Pick<CommentModel, 'body' | 'resolved'>> }
+
+export interface NodePropsPatch {
+  name?: string
+  tag?: string
+  text?: string | null
+  visible?: boolean
+  locked?: boolean
+  isArtboard?: boolean
+  isComponentRoot?: boolean
+  componentId?: string | null
+  variantId?: string | null
+}
+
+export type TransactionSource = 'user' | 'ai' | 'system'
+
+export interface Transaction {
+  id: string
+  label: string
+  source: TransactionSource
+  ops: Op[]
+  /** Inverse ops in reverse order; applying them undoes the transaction. */
+  inverse: Op[]
+  /** Node ids touched, for AI result reporting and change indicators. */
+  changed: NodeId[]
+  at: number
+}
