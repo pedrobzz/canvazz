@@ -275,3 +275,28 @@ function applyOp(draft: Draft, op: Op): Op {
     }
   }
 }
+
+export function applyOps(doc: DocumentModel, ops: Op[]): ApplyResult {
+  const draft = new Draft(doc)
+  const inverse: Op[] = []
+  for (const op of ops) inverse.push(applyOp(draft, op))
+  inverse.reverse()
+  return { doc: draft.doc, inverse, changed: [...draft.changed] }
+}
+
+export function emptyDocument(id: string, name: string): DocumentModel {
+  const pageId = 'page_1'
+  return {
+    id,
+    name,
+    schemaVersion: 1,
+    pages: [{ id: pageId, name: 'Page 1', children: [] }],
+    activePageId: pageId,
+    nodes: {},
+    components: {},
+    componentSets: {},
+    tokens: {},
+    assets: {},
+    comments: [],
+  }
+}
