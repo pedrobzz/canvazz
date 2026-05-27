@@ -100,3 +100,124 @@ function defaultName(tag: string, text?: string): string {
  * Parse an untrusted HTML fragment into model nodes. Requires a DOM
  * implementation (browser or jsdom/happy-dom in tests).
  */
+export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
+  const dropped: string[] = []
+  const nodes: NodeModel[] = []
+  const usedIds = new Set<string>()
+
+  const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html')
+
+  const takeId = (el: Element): string => {
+    const raw = el.getAttribute('data-cz-id')
+    if (
+      raw &&
+      ID_RE.test(raw) &&
+      !usedIds.has(raw) &&
+      !(opts.isIdTaken?.(raw) ?? false)
+    ) {
+      usedIds.add(raw)
+      return raw
+    }
+    const id = genId()
+    usedIds.add(id)
+    return id
+  }
+
+  const convertElement = (el: Element, parentId: string | null): NodeModel | null => {
+    const tag = el.tagName.toLowerCase()
+    if (DROP_CONTENT_TAGS.has(tag)) {
+      dropped.push(`tag:${tag}`)
+      return null
+    }
+
+    const node: NodeModel = {
+      id: takeId(el),
+      name: '',
+      tag: ALLOWED_TAGS.has(tag) ? tag : 'div',
+      attrs: {},
+      style: {},
+      classes: [],
+      children: [],
+      parent: parentId,
+      visible: true,
+      locked: false,
+    }
+    if (!ALLOWED_TAGS.has(tag)) dropped.push(`tag:${tag}->div`)
+
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase()
+      if (name === 'style') {
+        node.style = sanitizeStyle(attr.value, dropped)
+      } else if (name === 'class') {
+        const classes = sanitizeClasses(attr.value)
+        if (classes.length < attr.value.split(/\s+/).filter(Boolean).length) dropped.push('class:partial')
+        node.classes = classes
+      } else if (name === 'data-cz-name') {
+        node.name = attr.value.slice(0, 80)
+      } else if (name === 'data-cz-id') {
+        // consumed by takeId
+      } else if (name.startsWith('on') || name === 'srcdoc' || name === 'formaction') {
+        dropped.push(`attr:${name}`)
+      } else if (URL_ATTRS.has(name)) {
+        const safe = sanitizeUrl(attr.value)
+        if (safe !== null) node.attrs[name] = safe
+        else dropped.push(`url:${name}`)
+      } else if (isAllowedAttr(name)) {
+        node.attrs[name] = attr.value.slice(0, 1000)
+      } else if (!name.startsWith('data-')) {
+        dropped.push(`attr:${name}`)
+      }
+    }
+
+    nodes.push(node)
+
+    // Children: elements and meaningful text. Mixed content normalizes loose
+    // text runs into spans (visually identical; keeps text-or-children model).
+    const childEls: NodeModel[] = []
+    let textOnly = ''
+    let hasElementChild = false
+    for (const child of Array.from(el.childNodes)) {
+      if (child.nodeType === 1) hasElementChild = true
+    }
+    for (const child of Array.from(el.childNodes)) {
+      if (child.nodeType === 3) {
+        const text = child.textContent ?? ''
+        if (!hasElementChild) {
+          textOnly += text
+        } else if (text.trim()) {
+          const span: NodeModel = {
+            id: genId(), name: defaultName('span', text), tag: 'span',
+            attrs: {}, style: {}, classes: [], children: [], parent: node.id,
+            visible: true, locked: false, text: text.replace(/\s+/g, ' '),
+          }
+          nodes.push(span)
+          childEls.push(span)
+        }
+      } else if (child.nodeType === 1) {
+        const converted = convertElement(child as Element, node.id)
+        if (converted) childEls.push(converted)
+      }
+    }
+
+    if (!hasElementChild) {
+      const text = textOnly.replace(/\s+/g, ' ').trim()
+      if (text) node.text = text
+    }
+    node.children = childEls.map((c) => c.id)
+    if (!node.name) node.name = defaultName(node.tag, node.text)
+    return node
+  }
+
+  const rootIds: string[] = []
+  for (const el of Array.from(doc.body.children)) {
+    const node = convertElement(el, null)
+    if (node) {
+      if (opts.defaultRootStyle && !node.style.position) {
+        node.style = { ...opts.defaultRootStyle, ...node.style }
+      }
+      rootIds.push(node.id)
+    }
+  }
+
+  return { nodes, rootIds, dropped }
+}
