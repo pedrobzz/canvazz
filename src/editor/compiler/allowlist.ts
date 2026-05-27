@@ -60,3 +60,50 @@ export const URL_ATTRS = new Set(['src', 'href'])
  * well-formed AI output needs. Shorthands are kept as authored to preserve
  * round-trip fidelity.
  */
+export const ALLOWED_CSS_PROPS = new Set([
+  // Box / position
+  'position', 'top', 'right', 'bottom', 'left', 'inset', 'z-index',
+  'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
+  'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+  'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+  'box-sizing', 'aspect-ratio', 'overflow', 'overflow-x', 'overflow-y',
+  // Flex / grid
+  'display', 'flex', 'flex-direction', 'flex-wrap', 'flex-flow', 'flex-grow',
+  'flex-shrink', 'flex-basis', 'order', 'gap', 'row-gap', 'column-gap',
+  'justify-content', 'justify-items', 'justify-self',
+  'align-items', 'align-content', 'align-self', 'place-items', 'place-content',
+  'grid-template-columns', 'grid-template-rows', 'grid-template-areas',
+  'grid-auto-flow', 'grid-auto-columns', 'grid-auto-rows',
+  'grid-column', 'grid-row', 'grid-area',
+  // Paint
+  'background', 'background-color', 'background-image', 'background-size',
+  'background-position', 'background-repeat', 'background-clip',
+  'background-attachment', 'background-origin', 'background-blend-mode',
+  'border', 'border-top', 'border-right', 'border-bottom', 'border-left',
+  'border-width', 'border-style', 'border-color',
+  'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width',
+  'border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style',
+  'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color',
+  'border-radius', 'border-top-left-radius', 'border-top-right-radius',
+  'border-bottom-left-radius', 'border-bottom-right-radius',
+  'outline', 'outline-offset', 'outline-width', 'outline-style', 'outline-color',
+  'box-shadow', 'opacity', 'mix-blend-mode', 'isolation',
+  'color', 'accent-color', 'caret-color',
+  // Typography
+  'font', 'font-family', 'font-size', 'font-weight', 'font-style',
+  'font-variant', 'font-stretch', 'line-height', 'letter-spacing',
+  'word-spacing', 'text-align', 'text-decoration', 'text-decoration-line',
+  'text-decoration-style', 'text-decoration-color', 'text-decoration-thickness',
+  'text-transform', 'text-overflow', 'text-shadow', 'text-indent', 'text-wrap',
+  'white-space', 'word-break', 'overflow-wrap', 'hyphens', 'vertical-align',
+  'list-style', 'list-style-type', 'list-style-position', '-webkit-line-clamp',
+  '-webkit-box-orient', '-webkit-background-clip', '-webkit-text-fill-color',
+  // Effects / geometry
+  'transform', 'transform-origin', 'rotate', 'scale', 'translate',
+  'filter', 'backdrop-filter', 'clip-path', 'mask-image',
+  'object-fit', 'object-position', 'cursor', 'pointer-events',
+  'visibility', 'user-select', 'transition', 'will-change',
+  'contain', 'content-visibility', 'container-type',
+])
+
+/** Value-level rejects: expressions and external loads inside CSS values. */
