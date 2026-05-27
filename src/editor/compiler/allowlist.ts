@@ -34,3 +34,29 @@ export function isAllowedAttr(name: string): boolean {
   const lower = name.toLowerCase()
   return ALLOWED_ATTRS.has(lower) || lower.startsWith('aria-')
 }
+
+const SAFE_URL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:'])
+
+/** Allows safe absolute URLs, relative paths, fragments, and data images. */
+export function sanitizeUrl(value: string): string | null {
+  const trimmed = value.trim()
+  if (trimmed === '') return null
+  if (/^data:image\/(png|jpeg|jpg|gif|webp|avif);base64,/i.test(trimmed)) return trimmed
+  if (trimmed.startsWith('#') || trimmed.startsWith('/') || trimmed.startsWith('./')) return trimmed
+  try {
+    const url = new URL(trimmed)
+    return SAFE_URL_PROTOCOLS.has(url.protocol) ? trimmed : null
+  } catch {
+    // Bare relative path without scheme.
+    return /^[\w][\w\-./?=&%#+ ]*$/.test(trimmed) ? trimmed : null
+  }
+}
+
+export const URL_ATTRS = new Set(['src', 'href'])
+
+/**
+ * Allowed CSS properties (kebab-case). Covers layout, flex/grid, box model,
+ * paint, typography, and effects — everything the inspector edits plus what
+ * well-formed AI output needs. Shorthands are kept as authored to preserve
+ * round-trip fidelity.
+ */
