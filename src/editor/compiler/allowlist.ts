@@ -107,3 +107,25 @@ export const ALLOWED_CSS_PROPS = new Set([
 ])
 
 /** Value-level rejects: expressions and external loads inside CSS values. */
+const FORBIDDEN_VALUE = /(expression\s*\(|javascript:|behavior\s*:|-moz-binding|@import|url\s*\(\s*['"]?\s*(?!data:image\/|#|\/(?!\/)|\.\/|https:))/i
+
+export function isSafeCssValue(value: string): boolean {
+  if (value.length > 2000) return false
+  if (FORBIDDEN_VALUE.test(value)) return false
+  // Block control characters and angle brackets; allow normal CSS punctuation.
+  return !/[\u0000-\u0008\u000B\u000C\u000E-\u001F<>]/.test(value)
+}
+
+export function isAllowedCssProp(prop: string): boolean {
+  const lower = prop.toLowerCase().trim()
+  return ALLOWED_CSS_PROPS.has(lower) || lower.startsWith('--')
+}
+
+/** Tailwind class tokens: conservative charset, no arbitrary-value escapes that could smuggle url(). */
+const CLASS_TOKEN = /^[\w!:@<>/.\-[\]()%#,&*]+$/
+const CLASS_FORBIDDEN = /(javascript:|url\((?!['"]?(data:image\/|#|https:)))/i
+
+export function sanitizeClasses(input: string | string[]): string[] {
+  const tokens = Array.isArray(input) ? input : input.split(/\s+/)
+  return tokens.filter((t) => t.length > 0 && t.length <= 200 && CLASS_TOKEN.test(t) && !CLASS_FORBIDDEN.test(t))
+}
