@@ -38,9 +38,8 @@ export function styleToReact(style: Record<string, string>): Record<string, stri
     if (key.startsWith('--')) {
       out[key] = value
     } else {
-      const camel = key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())
-      // -webkit-foo -> WebkitFoo (leading dash leaves leading lowercase otherwise)
-      out[key.startsWith('-') ? camel.slice(1).charAt(0).toUpperCase() + camel.slice(2) : camel] = value
+      // -webkit-line-clamp -> WebkitLineClamp; border-top -> borderTop
+      out[key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())] = value
     }
   }
   return out
