@@ -182,4 +182,48 @@ export class EditorStore {
     }
     for (const fn of this.docListeners) fn()
   }
+
+  // --- UI state ------------------------------------------------------------
+
+  setUi(patch: Partial<UiState>) {
+    this.ui = { ...this.ui, ...patch }
+    for (const fn of this.uiListeners) fn()
+  }
+
+  setSelection(ids: NodeId[]) {
+    const valid = ids.filter((id) => this.doc.nodes[id])
+    const same =
+      valid.length === this.ui.selection.length && valid.every((id, i) => id === this.ui.selection[i])
+    if (!same) this.setUi({ selection: valid })
+  }
+
+  setTool(tool: Tool) {
+    if (this.ui.tool !== tool) this.setUi({ tool })
+  }
+
+  // --- Queries -------------------------------------------------------------
+
+  activePage() {
+    const page = this.doc.pages.find((p) => p.id === this.doc.activePageId) ?? this.doc.pages[0]
+    if (!page) throw new Error('Document has no pages')
+    return page
+  }
+
+  /** Page a node ultimately belongs to (walks to the top-level ancestor). */
+  pageOf(id: NodeId): string | null {
+    let cur: NodeId | null = id
+    while (cur) {
+      const node: (typeof this.doc.nodes)[string] | undefined = this.doc.nodes[cur]
+      if (!node) return null
+      if (!node.parent) {
+        const page = this.doc.pages.find((p) => p.children.includes(cur as NodeId))
+        return page?.id ?? null
+      }
+      cur = node.parent
+    }
+    return null
+  }
 }
+
+/** Singleton store for the app; tests construct their own instances. */
+export const editorStore = new EditorStore()
