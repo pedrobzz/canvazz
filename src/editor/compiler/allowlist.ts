@@ -107,7 +107,7 @@ export const ALLOWED_CSS_PROPS = new Set([
 ])
 
 /** Value-level rejects: expressions and external loads inside CSS values. */
-const FORBIDDEN_VALUE = /(expression\s*\(|javascript:|behavior\s*:|-moz-binding|@import|url\s*\(\s*['"]?\s*(?!data:image\/|#|\/(?!\/)|\.\/|https:))/i
+const FORBIDDEN_VALUE = /(expression\s*\(|javascript:|behavior\s*:|-moz-binding|@import|url\s*\(\s*(?!['"]?\s*(?:data:image\/|#|\/(?!\/)|\.\/|https:)))/i
 
 export function isSafeCssValue(value: string): boolean {
   if (value.length > 2000) return false
