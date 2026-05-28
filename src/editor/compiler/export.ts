@@ -45,3 +45,38 @@ export function styleToReact(style: Record<string, string>): Record<string, stri
   }
   return out
 }
+
+function attrsOf(node: ResolvedNode, opts: ExportOptions): Array<[string, string]> {
+  const pairs: Array<[string, string]> = []
+  if (opts.ids !== false) {
+    pairs.push(['data-cz-id', node.sourceId])
+    pairs.push(['data-cz-name', node.name])
+  }
+  if (node.classes.length > 0) pairs.push(['class', node.classes.join(' ')])
+  const style = { ...node.style }
+  if (!node.visible) style.display = 'none'
+  if (Object.keys(style).length > 0) pairs.push(['style', styleToString(style)])
+  for (const [k, v] of Object.entries(node.attrs)) pairs.push([k, v])
+  return pairs
+}
+
+export function resolvedToHtml(node: ResolvedNode, opts: ExportOptions = {}, depth = 0): string {
+  const indent = opts.indent ?? '  '
+  const pad = indent.repeat(depth)
+  const attrs = attrsOf(node, opts)
+    .map(([k, v]) => ` ${k}="${escapeHtml(v)}"`)
+    .join('')
+  const open = `${pad}<${node.tag}${attrs}>`
+  if (VOID_TAGS.has(node.tag)) return `${pad}<${node.tag}${attrs} />`
+  if (node.children.length === 0) {
+    return `${open}${escapeHtml(node.text ?? '')}</${node.tag}>`
+  }
+  const children = node.children.map((c) => resolvedToHtml(c, opts, depth + 1)).join('\n')
+  return `${open}\n${children}\n${pad}</${node.tag}>`
+}
+
+export function exportHtml(doc: DocumentModel, rootId: NodeId, opts: ExportOptions = {}): string {
+  const resolved = resolveNode(doc, rootId)
+  if (!resolved) throw new Error(`Unknown node: ${rootId}`)
+  return resolvedToHtml(resolved, opts)
+}
