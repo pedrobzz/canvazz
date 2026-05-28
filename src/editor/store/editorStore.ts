@@ -104,4 +104,82 @@ export class EditorStore {
   }
 
   getNode = (id: NodeId) => this.doc.nodes[id] ?? null
+
+  // --- Mutations -----------------------------------------------------------
+
+  apply(label: string, ops: Op[], source: TransactionSource = 'user'): Transaction | null {
+    if (ops.length === 0) return null
+    const selectionBefore = this.ui.selection
+    const { doc, inverse, changed } = applyOps(this.doc, ops)
+    this.doc = doc
+    const tx: Transaction = { id: genId('tx'), label, source, ops, inverse, changed, at: Date.now() }
+    this.undoStack.push({ tx, selectionBefore, selectionAfter: this.ui.selection })
+    if (this.undoStack.length > 500) this.undoStack.shift()
+    this.redoStack = []
+    this.log = [...this.log.slice(-199), {
+      id: tx.id, label, source, changed, at: tx.at, undone: false,
+    }]
+    if (source === 'ai') this.setUi({ aiChanged: changed })
+    this.commit(changed)
+    for (const fn of this.txListeners) fn(tx)
+    return tx
+  }
+
+  /** Re-records selectionAfter for the latest entry (set selection post-apply). */
+  recordSelectionAfter() {
+    const last = this.undoStack[this.undoStack.length - 1]
+    if (last) last.selectionAfter = this.ui.selection
+  }
+
+  undo(): boolean {
+    const entry = this.undoStack.pop()
+    if (!entry) return false
+    const { doc, changed } = applyOps(this.doc, entry.tx.inverse)
+    this.doc = doc
+    this.redoStack.push(entry)
+    this.log = this.log.map((l) => (l.id === entry.tx.id ? { ...l, undone: true } : l))
+    this.setSelection(entry.selectionBefore.filter((id) => this.doc.nodes[id]))
+    this.commit(changed)
+    return true
+  }
+
+  redo(): boolean {
+    const entry = this.redoStack.pop()
+    if (!entry) return false
+    const { doc, changed } = applyOps(this.doc, entry.tx.ops)
+    this.doc = doc
+    this.undoStack.push(entry)
+    this.log = this.log.map((l) => (l.id === entry.tx.id ? { ...l, undone: false } : l))
+    this.setSelection(entry.selectionAfter.filter((id) => this.doc.nodes[id]))
+    this.commit(changed)
+    return true
+  }
+
+  canUndo = () => this.undoStack.length > 0
+  canRedo = () => this.redoStack.length > 0
+
+  /** Replace the whole document (load from disk, import). Clears history. */
+  replaceDocument(doc: DocumentModel) {
+    this.doc = doc
+    this.undoStack = []
+    this.redoStack = []
+    this.setUi({ selection: [], hoverId: null, editingTextId: null, aiChanged: [] })
+    this.docVersion++
+    for (const fn of this.docListeners) fn()
+    for (const set of this.nodeListeners.values()) for (const fn of set) fn()
+  }
+
+  private commit(changed: NodeId[]) {
+    this.docVersion++
+    // Prune selection of nodes that no longer exist.
+    if (this.ui.selection.some((id) => !this.doc.nodes[id])) {
+      this.ui = { ...this.ui, selection: this.ui.selection.filter((id) => this.doc.nodes[id]) }
+      for (const fn of this.uiListeners) fn()
+    }
+    for (const id of changed) {
+      const set = this.nodeListeners.get(id)
+      if (set) for (const fn of set) fn()
+    }
+    for (const fn of this.docListeners) fn()
+  }
 }
