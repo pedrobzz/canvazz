@@ -90,3 +90,58 @@ export const NodeView = memo(function NodeView({ id }: { id: NodeId }) {
       : node.text ?? null
   return createElement(node.tag, { key: id, ...props }, children)
 })
+
+/** In-place text editing: the actual element becomes contentEditable. */
+function EditableText({ node }: { node: NodeModel }) {
+  const ref = useRef<HTMLElement | null>(null)
+  const committed = useRef(false)
+  // Flattened rich text (children spans) edits as one plain string.
+  const initialText =
+    node.text ?? node.children.map((c) => editorStore.doc.nodes[c]?.text ?? '').join('')
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.focus()
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    const sel = window.getSelection()
+    sel?.removeAllRanges()
+    sel?.addRange(range)
+    return () => commit()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const commit = () => {
+    if (committed.current) return
+    committed.current = true
+    const el = ref.current
+    if (el && el.textContent !== initialText) {
+      setTextContent({ store: editorStore }, node.id, el.textContent ?? '')
+    }
+    if (editorStore.ui.editingTextId === node.id) {
+      editorStore.setUi({ editingTextId: null })
+    }
+  }
+
+  const props = buildProps({
+    tag: node.tag, pathId: node.id, attrs: node.attrs, style: node.style,
+    classes: node.classes, text: node.text, visible: node.visible,
+  })
+  return createElement(node.tag, {
+    ...props,
+    ref: ref as Ref<HTMLElement>,
+    contentEditable: true,
+    suppressContentEditableWarning: true,
+    'data-canvas-text': true,
+    onBlur: commit,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      e.stopPropagation()
+      if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) {
+        e.preventDefault()
+        commit()
+      }
+    },
+    onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
+  }, initialText)
+}
