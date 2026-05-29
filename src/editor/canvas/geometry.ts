@@ -91,3 +91,58 @@ export const fmtPx = (n: number) => `${Math.round(n * 100) / 100}px`
  * Snap a moving rect's edges/centers against target edges/centers.
  * Returns adjusted deltas and the guide lines to draw (world coords).
  */
+export interface SnapGuide {
+  axis: 'x' | 'y'
+  position: number
+  from: number
+  to: number
+}
+
+export function snapRect(
+  moving: Rect,
+  targets: Rect[],
+  threshold: number,
+): { dx: number; dy: number; guides: SnapGuide[] } {
+  const movingXs = [moving.x, moving.x + moving.width / 2, moving.x + moving.width]
+  const movingYs = [moving.y, moving.y + moving.height / 2, moving.y + moving.height]
+  let bestDx: number | null = null
+  let bestDy: number | null = null
+  let guideX: SnapGuide | null = null
+  let guideY: SnapGuide | null = null
+
+  for (const t of targets) {
+    const targetXs = [t.x, t.x + t.width / 2, t.x + t.width]
+    const targetYs = [t.y, t.y + t.height / 2, t.y + t.height]
+    for (const mx of movingXs) {
+      for (const tx of targetXs) {
+        const d = tx - mx
+        if (Math.abs(d) <= threshold && (bestDx === null || Math.abs(d) < Math.abs(bestDx))) {
+          bestDx = d
+          guideX = {
+            axis: 'x', position: tx,
+            from: Math.min(moving.y, t.y),
+            to: Math.max(moving.y + moving.height, t.y + t.height),
+          }
+        }
+      }
+    }
+    for (const my of movingYs) {
+      for (const ty of targetYs) {
+        const d = ty - my
+        if (Math.abs(d) <= threshold && (bestDy === null || Math.abs(d) < Math.abs(bestDy))) {
+          bestDy = d
+          guideY = {
+            axis: 'y', position: ty,
+            from: Math.min(moving.x, t.x),
+            to: Math.max(moving.x + moving.width, t.x + t.width),
+          }
+        }
+      }
+    }
+  }
+
+  const guides: SnapGuide[] = []
+  if (guideX) guides.push(guideX)
+  if (guideY) guides.push(guideY)
+  return { dx: bestDx ?? 0, dy: bestDy ?? 0, guides }
+}
