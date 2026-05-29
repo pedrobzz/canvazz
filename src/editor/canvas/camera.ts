@@ -52,6 +52,30 @@ export class CameraStore {
     const { x, y, scale } = this.camera
     return { x: worldX * scale + x, y: worldY * scale + y }
   }
+
+  /** Fit a world-space rect into the viewport with padding. */
+  fitRect(
+    rect: { x: number; y: number; width: number; height: number },
+    viewport: { width: number; height: number },
+    padding = 64,
+  ) {
+    if (rect.width <= 0 || rect.height <= 0) return
+    const scale = clamp(
+      Math.min(
+        (viewport.width - padding * 2) / rect.width,
+        (viewport.height - padding * 2) / rect.height,
+      ),
+      MIN_SCALE,
+      MAX_SCALE,
+    )
+    this.set({
+      scale,
+      x: viewport.width / 2 - (rect.x + rect.width / 2) * scale,
+      y: viewport.height / 2 - (rect.y + rect.height / 2) * scale,
+    })
+  }
 }
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v))
+
+export const cameraStore = new CameraStore()
