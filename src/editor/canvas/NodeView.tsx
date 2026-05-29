@@ -145,3 +145,73 @@ function EditableText({ node }: { node: NodeModel }) {
     onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
   }, initialText)
 }
+
+/** Renders an instance by expanding its component definition. */
+function InstanceView({ instance }: { instance: NodeModel }) {
+  const rootId = effectiveComponentRoot(editorStore.doc, instance)
+  if (!rootId) return null
+  return <DefNodeView defId={rootId} instance={instance} isRoot seen={EMPTY_SET} />
+}
+
+const EMPTY_SET: ReadonlySet<string> = new Set()
+
+const DefNodeView = memo(function DefNodeView({
+  defId,
+  instance,
+  isRoot,
+  seen,
+}: {
+  defId: NodeId
+  instance: NodeModel
+  isRoot?: boolean
+  seen: ReadonlySet<string>
+}) {
+  const defNode = useNode(defId)
+  if (!defNode) return null
+  const override = instance.overrides?.[defId]
+
+  // Nested instance (or swapped one) inside the definition.
+  if (defNode.componentId && !isRoot) {
+    const effective: NodeModel = override?.componentId || override?.variantId
+      ? { ...defNode, componentId: override.componentId ?? defNode.componentId, variantId: override.variantId ?? defNode.variantId }
+      : defNode
+    const nestedDefId = effective.variantId ?? effective.componentId
+    if (!nestedDefId || seen.has(nestedDefId)) return null
+    const rootId = effectiveComponentRoot(editorStore.doc, effective)
+    if (!rootId) return null
+    const nested: NodeModel = { ...effective, id: `${instance.id}:${defId}` }
+    return (
+      <DefNodeView
+        defId={rootId}
+        instance={nested}
+        isRoot
+        seen={new Set(seen).add(nestedDefId)}
+      />
+    )
+  }
+
+  const merged = applyOverride(defNode, override)
+  let style = merged.style
+  let classes = merged.classes
+  let visible = merged.visible
+  let text = merged.text
+  if (isRoot) {
+    style = { ...style, ...instance.style }
+    classes = instance.classes.length > 0 ? instance.classes : classes
+    visible = instance.visible
+    if (instance.text !== undefined) text = instance.text
+  }
+
+  const pathId = isRoot ? instance.id : `${instance.id}:${defId}`
+  const props = buildProps({
+    tag: defNode.tag, pathId, attrs: merged.attrs, style, classes, text, visible,
+  })
+  if (VOID_TAGS.has(defNode.tag)) return createElement(defNode.tag, props)
+  const children: ReactNode =
+    defNode.children.length > 0
+      ? defNode.children.map((c) => (
+          <DefNodeView key={c} defId={c} instance={instance} seen={seen} />
+        ))
+      : text ?? null
+  return createElement(defNode.tag, props, children)
+})
