@@ -65,3 +65,29 @@ export function worldToScreenRect(rect: Rect, camera: Camera): Rect {
 export function worldRectOf(el: Element, viewport: HTMLElement, camera: Camera): Rect {
   return screenToWorldRect(screenRectOf(el, viewport), camera)
 }
+
+export function nodeElement(world: HTMLElement, pathId: string): HTMLElement | null {
+  return world.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(pathId)}"]`)
+}
+
+/** Rotation in degrees from the model (CSS `rotate` property). */
+export function nodeRotation(doc: DocumentModel, id: NodeId): number {
+  const raw = doc.nodes[id]?.style.rotate
+  if (!raw) return 0
+  const m = /^(-?[\d.]+)deg$/.exec(raw.trim())
+  return m ? parseFloat(m[1]) : 0
+}
+
+/** Parse "123px" -> 123; returns null for anything else. */
+export function px(value: string | undefined): number | null {
+  if (!value) return null
+  const m = /^(-?[\d.]+)px$/.exec(value.trim())
+  return m ? parseFloat(m[1]) : null
+}
+
+export const fmtPx = (n: number) => `${Math.round(n * 100) / 100}px`
+
+/**
+ * Snap a moving rect's edges/centers against target edges/centers.
+ * Returns adjusted deltas and the guide lines to draw (world coords).
+ */
