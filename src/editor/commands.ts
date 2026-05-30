@@ -268,3 +268,48 @@ export function pasteHtml(ctx: CommandCtx, html: string, offset = 16): NodeId[] 
   store.recordSelectionAfter()
   return rootIds
 }
+
+export function renameNode(ctx: CommandCtx, id: NodeId, name: string) {
+  ctx.store.apply('Rename', [{ t: 'setProps', id, patch: { name } }], src(ctx))
+}
+
+export function setVisibility(ctx: CommandCtx, id: NodeId, visible: boolean) {
+  ctx.store.apply(visible ? 'Show' : 'Hide', [{ t: 'setProps', id, patch: { visible } }], src(ctx))
+}
+
+export function setLocked(ctx: CommandCtx, id: NodeId, locked: boolean) {
+  ctx.store.apply(locked ? 'Lock' : 'Unlock', [{ t: 'setProps', id, patch: { locked } }], src(ctx))
+}
+
+// --- helpers ---------------------------------------------------------------
+
+export function locate(store: EditorStore, id: NodeId): NodeLocation | null {
+  const node = store.doc.nodes[id]
+  if (!node) return null
+  if (node.parent) {
+    const index = store.doc.nodes[node.parent]?.children.indexOf(id) ?? -1
+    return index >= 0 ? { kind: 'node', parent: node.parent, index } : null
+  }
+  for (const page of store.doc.pages) {
+    const index = page.children.indexOf(id)
+    if (index >= 0) return { kind: 'page', pageId: page.id, index }
+  }
+  return null
+}
+
+/** Drop ids that are descendants of other ids in the set. */
+export function topMostOnly(store: EditorStore, ids: NodeId[]): NodeId[] {
+  const set = new Set(ids)
+  return ids.filter((id) => {
+    let cur = store.doc.nodes[id]?.parent ?? null
+    while (cur) {
+      if (set.has(cur)) return false
+      cur = store.doc.nodes[cur]?.parent ?? null
+    }
+    return true
+  })
+}
+
+export function subtreeNodes(store: EditorStore, id: NodeId): NodeModel[] {
+  return collectSubtree(store.doc, id)
+}
