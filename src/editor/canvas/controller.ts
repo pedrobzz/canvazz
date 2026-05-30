@@ -430,4 +430,158 @@ export class InteractionController {
         break
     }
   }
+
+  // --- Gesture starters ----------------------------------------------------
+
+  private startDrag(ids: NodeId[], e: PointerEvent) {
+    const camera = cameraStore.camera
+    const items: Array<{ id: NodeId; el: HTMLElement; left: number; top: number }> = []
+    const roots = topMostOnly(this.store, ids)
+    for (const id of roots) {
+      const node = this.store.doc.nodes[id]
+      const el = nodeElement(this.world, id)
+      if (!node || !el || node.locked) continue
+      // Only absolutely-positioned nodes free-drag; flex children reorder via layer tree (v1).
+      const left = px(node.style.left)
+      const top = px(node.style.top)
+      if (left === null || top === null) continue
+      items.push({ id, el, left, top })
+    }
+    if (items.length === 0) return
+    const startRects = items.map(({ el }) => worldRectOf(el, this.viewport, camera))
+    this.gesture = {
+      type: 'drag', items, startClientX: e.clientX, startClientY: e.clientY,
+      moved: false, snapTargets: this.snapTargetsFor(items.map((i) => i.id)),
+      startRects, dropTarget: null,
+    }
+    this.viewport.setPointerCapture(e.pointerId)
+  }
+
+  private startResize(e: PointerEvent, dir: string) {
+    const camera = cameraStore.camera
+    const items: Array<{ id: NodeId; el: HTMLElement; rect: Rect }> = []
+    for (const pathId of topMostOnly(this.store, this.store.ui.selection)) {
+      const { sourceId } = parsePathId(pathId)
+      const node = this.store.doc.nodes[sourceId]
+      const el = nodeElement(this.world, pathId)
+      if (!node || !el || node.locked) continue
+      const left = px(node.style.left)
+      const top = px(node.style.top)
+      if (left === null || top === null) continue
+      items.push({
+        id: sourceId, el,
+        rect: { x: left, y: top, width: el.offsetWidth, height: el.offsetHeight },
+      })
+    }
+    if (items.length === 0) return
+    const union = unionRects(items.map((i) => i.rect))
+    if (!union) return
+    this.gesture = {
+      type: 'resize', dir, items, union,
+      startClientX: e.clientX, startClientY: e.clientY, centerMode: false,
+    }
+    this.viewport.setPointerCapture(e.pointerId)
+    void camera
+    e.stopPropagation()
+  }
+
+  private startRotate(e: PointerEvent) {
+    const pathId = this.store.ui.selection[0]
+    if (!pathId) return
+    const { sourceId } = parsePathId(pathId)
+    const el = nodeElement(this.world, pathId)
+    const node = this.store.doc.nodes[sourceId]
+    if (!el || !node) return
+    const rect = el.getBoundingClientRect()
+    const centerX = rect.left + rect.width / 2
+    const centerY = rect.top + rect.height / 2
+    const startAngle = (Math.atan2(e.clientY - centerY, e.clientX - centerX) * 180) / Math.PI
+    const base = node.style.rotate ? parseFloat(node.style.rotate) || 0 : 0
+    this.gesture = { type: 'rotate', id: sourceId, el, centerX, centerY, startAngle, base }
+    this.viewport.setPointerCapture(e.pointerId)
+    e.stopPropagation()
+  }
+
+  private startDraw(e: PointerEvent, tool: Tool) {
+    const world = this.toWorld(e)
+    // Shapes land in the deepest frame under the cursor; artboards land on the page.
+    let container: { parent: NodeId | null; originX: number; originY: number } = {
+      parent: null, originX: 0, originY: 0,
+    }
+    if (tool !== 'frame') {
+      const target = this.dropTargetAt(e, [])
+      if (target) container = { parent: target.id, originX: target.rect.x, originY: target.rect.y }
+    }
+    this.gesture = { type: 'draw', tool, startWorldX: world.x, startWorldY: world.y, container }
+    this.viewport.setPointerCapture(e.pointerId)
+  }
+
+  private finishDraw(g: Extract<Gesture, { type: 'draw' }>, e: PointerEvent) {
+    const world = this.toWorld(e)
+    let rect: Rect = {
+      x: Math.min(g.startWorldX, world.x), y: Math.min(g.startWorldY, world.y),
+      width: Math.abs(world.x - g.startWorldX), height: Math.abs(world.y - g.startWorldY),
+    }
+    if (e.shiftKey) {
+      const side = Math.max(rect.width, rect.height)
+      rect = { ...rect, width: side, height: side }
+    }
+    const isClick = rect.width < 4 && rect.height < 4
+    if (isClick) {
+      const defaults: Partial<Record<Tool, { w: number; h: number }>> = {
+        frame: { w: 375, h: 667 }, rect: { w: 100, h: 100 }, ellipse: { w: 100, h: 100 },
+        polygon: { w: 100, h: 100 }, star: { w: 100, h: 100 }, line: { w: 100, h: 0 },
+      }
+      const d = defaults[g.tool] ?? { w: 100, h: 100 }
+      rect = { x: rect.x, y: rect.y, width: d.w, height: d.h }
+    }
+
+    const inPage = g.container.parent === null || g.tool === 'frame'
+    const local: Rect = inPage
+      ? rect
+      : { ...rect, x: rect.x - g.container.originX, y: rect.y - g.container.originY }
+
+    let node: NodeModel
+    switch (g.tool) {
+      case 'frame':
+        node = createArtboard(this.nextArtboardName(), local)
+        break
+      case 'rect': node = createRectangle(local); break
+      case 'ellipse': node = createEllipse(local); break
+      case 'polygon': node = createPolygon(local); break
+      case 'star': node = createStar(local); break
+      case 'line': {
+        const dx = world.x - g.startWorldX
+        const dy = world.y - g.startWorldY
+        const length = isClick ? 100 : Math.hypot(dx, dy)
+        const angle = isClick ? 0 : (Math.atan2(dy, dx) * 180) / Math.PI
+        node = createLine(
+          g.startWorldX - (inPage ? 0 : g.container.originX),
+          g.startWorldY - (inPage ? 0 : g.container.originY),
+          length, angle,
+        )
+        break
+      }
+      case 'text':
+        node = createText(local.x, local.y)
+        break
+      default:
+        return
+    }
+
+    const page = this.store.activePage()
+    const at = inPage
+      ? ({ kind: 'page', pageId: page.id, index: page.children.length } as const)
+      : ({
+          kind: 'node', parent: g.container.parent as NodeId,
+          index: this.store.doc.nodes[g.container.parent as NodeId]?.children.length ?? 0,
+        } as const)
+    this.store.apply(`Create ${node.name}`, [
+      { t: 'insertTree', nodes: [node], rootId: node.id, at },
+    ])
+    this.store.setSelection([node.id])
+    this.store.recordSelectionAfter()
+    this.store.setTool('select')
+    if (g.tool === 'text') this.store.setUi({ editingTextId: node.id })
+  }
 }
