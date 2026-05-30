@@ -109,4 +109,163 @@ export class InteractionController {
     this.store.setSelection([id])
     this.startDrag([id], e)
   }
+
+  // --- Pointer -------------------------------------------------------------
+
+  private onPointerDown(e: PointerEvent) {
+    if (e.target instanceof Element && e.target.closest('[data-cz-ui]')) return
+    const { store } = this
+    if (store.ui.editingTextId) {
+      const hit = this.pickPathId(e)
+      if (hit === store.ui.editingTextId) return // typing inside the text node
+      this.commitTextEdit()
+    }
+
+    // Pan: middle button, space+left, or hand tool.
+    if (e.button === 1 || (e.button === 0 && (this.spaceDown || store.ui.tool === 'hand'))) {
+      this.gesture = { type: 'pan', lastX: e.clientX, lastY: e.clientY }
+      this.viewport.setPointerCapture(e.pointerId)
+      this.setCursor('grabbing')
+      e.preventDefault()
+      return
+    }
+    if (e.button !== 0) return
+
+    const tool = store.ui.tool
+
+    if (SHAPE_TOOLS.has(tool)) {
+      this.startDraw(e, tool)
+      return
+    }
+
+    if (tool === 'comment') {
+      const world = this.toWorld(e)
+      store.apply('Add comment', [{
+        t: 'addComment',
+        comment: {
+          id: `c_${Date.now().toString(36)}`, nodeId: null, x: world.x, y: world.y,
+          author: 'You', body: '', createdAt: Date.now(), resolved: false,
+        },
+      }])
+      store.setTool('select')
+      return
+    }
+
+    // Select tool. Resize/rotate handles first (they live in the overlay).
+    const handle = (e.target as Element).closest?.('[data-handle]')
+    if (handle instanceof HTMLElement && store.ui.selection.length > 0) {
+      const dir = handle.dataset.handle
+      if (dir === 'rotate') this.startRotate(e)
+      else if (dir) this.startResize(e, dir)
+      return
+    }
+
+    const picked = this.pickSelection(e)
+    if (picked) {
+      let next: NodeId[]
+      if (e.shiftKey) {
+        next = store.ui.selection.includes(picked)
+          ? store.ui.selection.filter((id) => id !== picked)
+          : [...store.ui.selection, picked]
+        store.setSelection(next)
+        return // shift-click adjusts selection, never starts a drag
+      }
+      next = store.ui.selection.includes(picked) ? store.ui.selection : [picked]
+      store.setSelection(next)
+      if (e.altKey) {
+        const dupes = duplicateNodes({ store }, next, 0)
+        if (dupes.length > 0) {
+          store.setSelection(dupes)
+          store.recordSelectionAfter()
+          next = dupes
+        }
+      }
+      this.startDrag(next, e)
+    } else {
+      this.gesture = {
+        type: 'marquee', startX: e.clientX, startY: e.clientY,
+        additive: e.shiftKey, base: e.shiftKey ? store.ui.selection : [],
+      }
+      if (!e.shiftKey) store.setSelection([])
+      this.viewport.setPointerCapture(e.pointerId)
+    }
+  }
+
+  private onPointerMove(e: PointerEvent) {
+    if (this.gesture.type === 'idle') {
+      this.updateHover(e)
+      return
+    }
+    this.lastPointer = e
+    if (!this.raf) {
+      this.raf = requestAnimationFrame(() => {
+        this.raf = 0
+        if (this.lastPointer) this.tick(this.lastPointer)
+      })
+    }
+  }
+
+  private onPointerUp(e: PointerEvent) {
+    const g = this.gesture
+    this.gesture = { type: 'idle' }
+    if (this.raf) {
+      cancelAnimationFrame(this.raf)
+      this.raf = 0
+    }
+    this.overlay.setMarquee(null)
+    this.overlay.setGuides([])
+    this.overlay.setSizeBadge(null)
+    this.overlay.setHidden(false)
+    this.setCursor(this.store.ui.tool === 'hand' ? 'grab' : '')
+
+    switch (g.type) {
+      case 'drag': {
+        if (!g.moved) break
+        const ops: Op[] = []
+        for (const { id, el } of g.items) {
+          ops.push({ t: 'setStyle', id, set: { left: el.style.left, top: el.style.top } })
+        }
+        // Reparent if dropped over a different container.
+        const drop = this.dropTargetAt(e, g.items.map((i) => i.id))
+        if (drop) {
+          for (const { id, el } of g.items) {
+            const rect = worldRectOf(el, this.viewport, cameraStore.camera)
+            const containerRect = drop.rect
+            ops.push({ t: 'move', id, to: { kind: 'node', parent: drop.id, index: drop.index } })
+            ops.push({
+              t: 'setStyle', id,
+              set: { left: fmtPx(rect.x - containerRect.x), top: fmtPx(rect.y - containerRect.y) },
+            })
+          }
+        }
+        this.store.apply('Move', ops)
+        this.store.recordSelectionAfter()
+        break
+      }
+      case 'resize': {
+        const ops: Op[] = g.items.map(({ id, el }) => ({
+          t: 'setStyle', id,
+          set: { left: el.style.left, top: el.style.top, width: el.style.width, height: el.style.height },
+        }))
+        this.store.apply('Resize', ops)
+        break
+      }
+      case 'rotate': {
+        this.store.apply('Rotate', [
+          { t: 'setStyle', id: g.id, set: { rotate: g.el.style.rotate || null } },
+        ])
+        break
+      }
+      case 'draw': {
+        this.finishDraw(g, e)
+        break
+      }
+      case 'marquee':
+        break
+      case 'pan':
+        break
+      case 'idle':
+        break
+    }
+  }
 }
