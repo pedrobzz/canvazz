@@ -139,3 +139,52 @@ export function ungroupNodes(ctx: CommandCtx, ids: NodeId[]): NodeId[] {
   store.recordSelectionAfter()
   return released
 }
+
+export type ZOrder = 'forward' | 'backward' | 'front' | 'back'
+
+export function reorderNodes(ctx: CommandCtx, ids: NodeId[], dir: ZOrder) {
+  const { store } = ctx
+  const ops: Op[] = []
+  for (const id of topMostOnly(store, ids)) {
+    const loc = locate(store, id)
+    if (!loc) continue
+    const siblings =
+      loc.kind === 'page'
+        ? store.doc.pages.find((p) => p.id === loc.pageId)?.children ?? []
+        : store.doc.nodes[loc.parent].children
+    const last = siblings.length - 1
+    const index =
+      dir === 'front' ? last : dir === 'back' ? 0
+      : dir === 'forward' ? Math.min(last, loc.index + 1) : Math.max(0, loc.index - 1)
+    if (index !== loc.index) ops.push({ t: 'move', id, to: { ...loc, index } })
+  }
+  if (ops.length > 0) store.apply(`Reorder ${dir}`, ops, src(ctx))
+}
+
+export function nudgeNodes(ctx: CommandCtx, ids: NodeId[], dx: number, dy: number) {
+  const { store } = ctx
+  const ops: Op[] = []
+  for (const id of topMostOnly(store, ids)) {
+    const node = store.doc.nodes[id]
+    if (!node || node.locked) continue
+    const left = px(node.style.left)
+    const top = px(node.style.top)
+    if (left === null || top === null) continue
+    ops.push({ t: 'setStyle', id, set: { left: fmtPx(left + dx), top: fmtPx(top + dy) } })
+  }
+  if (ops.length > 0) store.apply('Nudge', ops, src(ctx))
+}
+
+export function setTextContent(ctx: CommandCtx, id: NodeId, text: string) {
+  const { store } = ctx
+  const node = store.doc.nodes[id]
+  if (!node) return
+  if (node.children.length > 0) {
+    // Editing flattened rich text: replace children with the plain string.
+    const ops: Op[] = node.children.map((c) => ({ t: 'remove', id: c }) as Op)
+    ops.push({ t: 'setProps', id, patch: { text } })
+    store.apply('Edit text', ops, src(ctx))
+  } else {
+    store.apply('Edit text', [{ t: 'setProps', id, patch: { text } }], src(ctx))
+  }
+}
