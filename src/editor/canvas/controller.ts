@@ -268,4 +268,166 @@ export class InteractionController {
         break
     }
   }
+
+  private tick(e: PointerEvent) {
+    const g = this.gesture
+    const camera = cameraStore.camera
+    switch (g.type) {
+      case 'pan': {
+        cameraStore.panBy(e.clientX - g.lastX, e.clientY - g.lastY)
+        this.gesture = { ...g, lastX: e.clientX, lastY: e.clientY }
+        break
+      }
+      case 'marquee': {
+        const v = this.viewport.getBoundingClientRect()
+        const rect: Rect = {
+          x: Math.min(g.startX, e.clientX) - v.left,
+          y: Math.min(g.startY, e.clientY) - v.top,
+          width: Math.abs(e.clientX - g.startX),
+          height: Math.abs(e.clientY - g.startY),
+        }
+        this.overlay.setMarquee(rect)
+        const worldRect = screenToWorldRect(rect, camera)
+        const hits = this.marqueeHits(worldRect)
+        const next = g.additive ? [...new Set([...g.base, ...hits])] : hits
+        this.store.setSelection(next)
+        break
+      }
+      case 'drag': {
+        const scale = camera.scale
+        let dx = (e.clientX - g.startClientX) / scale
+        let dy = (e.clientY - g.startClientY) / scale
+        if (!g.moved && Math.hypot(dx * scale, dy * scale) < 3) return
+        g.moved = true
+        if (e.shiftKey) {
+          if (Math.abs(dx) > Math.abs(dy)) dy = 0
+          else dx = 0
+        }
+        let guides: SnapGuide[] = []
+        if (this.store.ui.snapping && !e.metaKey) {
+          const moving = unionRects(g.startRects.map((r) => ({ ...r, x: r.x + dx, y: r.y + dy })))
+          if (moving) {
+            const snapped = snapRect(moving, g.snapTargets, 8 / scale)
+            dx += snapped.dx
+            dy += snapped.dy
+            guides = snapped.guides
+          }
+        }
+        if (this.store.ui.showGrid && e.altKey) {
+          dx = Math.round(dx / 8) * 8
+          dy = Math.round(dy / 8) * 8
+        }
+        for (const item of g.items) {
+          item.el.style.left = fmtPx(item.left + dx)
+          item.el.style.top = fmtPx(item.top + dy)
+        }
+        this.overlay.setGuides(guides)
+        // Highlight prospective drop container.
+        const drop = this.dropTargetAt(e, g.items.map((i) => i.id))
+        g.dropTarget = drop?.id ?? null
+        break
+      }
+      case 'resize': {
+        const scale = camera.scale
+        const dx = (e.clientX - g.startClientX) / scale
+        const dy = (e.clientY - g.startClientY) / scale
+        const u = g.union
+        let x1 = u.x, y1 = u.y, x2 = u.x + u.width, y2 = u.y + u.height
+        if (g.dir.includes('w')) x1 += dx
+        if (g.dir.includes('e')) x2 += dx
+        if (g.dir.includes('n')) y1 += dy
+        if (g.dir.includes('s')) y2 += dy
+        if (e.altKey || g.centerMode) {
+          if (g.dir.includes('w')) x2 = u.x + u.width - (x1 - u.x)
+          if (g.dir.includes('e')) x1 = u.x - (x2 - (u.x + u.width))
+          if (g.dir.includes('n')) y2 = u.y + u.height - (y1 - u.y)
+          if (g.dir.includes('s')) y1 = u.y - (y2 - (u.y + u.height))
+        }
+        if (e.shiftKey && u.width > 0 && u.height > 0) {
+          const aspect = u.width / u.height
+          const w = x2 - x1
+          const h = y2 - y1
+          if (Math.abs(w / Math.max(h, 0.01)) > aspect === (g.dir === 'n' || g.dir === 's')) {
+            // grow the lagging axis
+          }
+          if (g.dir === 'n' || g.dir === 's') {
+            const newW = h * aspect
+            const cx = (x1 + x2) / 2
+            x1 = cx - newW / 2
+            x2 = cx + newW / 2
+          } else if (g.dir === 'e' || g.dir === 'w') {
+            const newH = w / aspect
+            const cy = (y1 + y2) / 2
+            y1 = cy - newH / 2
+            y2 = cy + newH / 2
+          } else {
+            const newH = w / aspect
+            if (g.dir.includes('n')) y1 = y2 - newH
+            else y2 = y1 + newH
+          }
+        }
+        const newUnion: Rect = {
+          x: Math.min(x1, x2), y: Math.min(y1, y2),
+          width: Math.max(1, Math.abs(x2 - x1)), height: Math.max(1, Math.abs(y2 - y1)),
+        }
+        const fx = newUnion.width / Math.max(u.width, 0.01)
+        const fy = newUnion.height / Math.max(u.height, 0.01)
+        for (const item of g.items) {
+          const r = item.rect
+          const nx = newUnion.x + (r.x - u.x) * fx
+          const ny = newUnion.y + (r.y - u.y) * fy
+          item.el.style.left = fmtPx(nx)
+          item.el.style.top = fmtPx(ny)
+          item.el.style.width = fmtPx(Math.max(1, r.width * fx))
+          item.el.style.height = fmtPx(Math.max(1, r.height * fy))
+        }
+        const screen = this.viewport.getBoundingClientRect()
+        this.overlay.setSizeBadge(
+          { x: e.clientX - screen.left, y: e.clientY - screen.top + 24 },
+          `${Math.round(newUnion.width)} × ${Math.round(newUnion.height)}`,
+        )
+        break
+      }
+      case 'rotate': {
+        const angle =
+          (Math.atan2(e.clientY - g.centerY, e.clientX - g.centerX) * 180) / Math.PI
+        let next = g.base + (angle - g.startAngle)
+        if (e.shiftKey) next = Math.round(next / 15) * 15
+        next = ((next % 360) + 360) % 360
+        g.el.style.rotate = `${Math.round(next * 10) / 10}deg`
+        const screen = this.viewport.getBoundingClientRect()
+        this.overlay.setSizeBadge(
+          { x: e.clientX - screen.left, y: e.clientY - screen.top + 24 },
+          `${Math.round(next)}°`,
+        )
+        break
+      }
+      case 'draw': {
+        const world = this.toWorld(e)
+        const rect: Rect = {
+          x: Math.min(g.startWorldX, world.x), y: Math.min(g.startWorldY, world.y),
+          width: Math.abs(world.x - g.startWorldX), height: Math.abs(world.y - g.startWorldY),
+        }
+        if (e.shiftKey) {
+          const side = Math.max(rect.width, rect.height)
+          rect.width = side
+          rect.height = side
+        }
+        const camera2 = cameraStore.camera
+        this.overlay.setMarquee({
+          x: rect.x * camera2.scale + camera2.x,
+          y: rect.y * camera2.scale + camera2.y,
+          width: rect.width * camera2.scale,
+          height: rect.height * camera2.scale,
+        })
+        this.overlay.setSizeBadge(
+          { x: e.clientX - this.viewport.getBoundingClientRect().left, y: e.clientY - this.viewport.getBoundingClientRect().top + 24 },
+          `${Math.round(rect.width)} × ${Math.round(rect.height)}`,
+        )
+        break
+      }
+      case 'idle':
+        break
+    }
+  }
 }
