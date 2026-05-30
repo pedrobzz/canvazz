@@ -584,4 +584,177 @@ export class InteractionController {
     this.store.setTool('select')
     if (g.tool === 'text') this.store.setUi({ editingTextId: node.id })
   }
+
+  // --- Wheel / zoom --------------------------------------------------------
+
+  private onWheel(e: WheelEvent) {
+    e.preventDefault()
+    if (e.ctrlKey || e.metaKey) {
+      const v = this.viewport.getBoundingClientRect()
+      const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.002))
+      cameraStore.zoomAt(e.clientX - v.left, e.clientY - v.top, cameraStore.camera.scale * factor)
+    } else if (e.shiftKey) {
+      cameraStore.panBy(-(e.deltaY + e.deltaX), 0)
+    } else {
+      cameraStore.panBy(-e.deltaX, -e.deltaY)
+    }
+  }
+
+  // --- Keyboard ------------------------------------------------------------
+
+  private onKeyDown(e: KeyboardEvent) {
+    const target = e.target as HTMLElement
+    const inField =
+      target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+    const { store } = this
+    const mod = e.metaKey || e.ctrlKey
+
+    if (e.code === 'Space' && !inField) {
+      if (!this.spaceDown) {
+        this.spaceDown = true
+        if (this.gesture.type === 'idle') this.setCursor('grab')
+      }
+      e.preventDefault()
+      return
+    }
+
+    if (mod && e.key.toLowerCase() === 'z') {
+      // Undo/redo work even while a field is focused, like native apps.
+      if (inField && !target.closest('[data-canvas-text]')) return
+      e.preventDefault()
+      if (e.shiftKey) store.redo()
+      else store.undo()
+      return
+    }
+
+    if (inField) return
+
+    const sel = store.ui.selection
+    const ctx = { store, getRect: (pathId: string) => this.rectOf(pathId) }
+
+    switch (e.key) {
+      case 'Delete':
+      case 'Backspace':
+        if (sel.length > 0) {
+          deleteNodes(ctx, sel.map((s) => parsePathId(s).sourceId))
+          e.preventDefault()
+        }
+        return
+      case 'ArrowLeft':
+      case 'ArrowRight':
+      case 'ArrowUp':
+      case 'ArrowDown': {
+        if (sel.length === 0) return
+        const step = e.shiftKey ? 10 : 1
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
+        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
+        nudgeNodes(ctx, sel.map((s) => parsePathId(s).sourceId), dx, dy)
+        e.preventDefault()
+        return
+      }
+      case 'Escape':
+        if (store.ui.editingTextId) this.commitTextEdit()
+        else if (sel.length > 0) store.setSelection([])
+        else store.setTool('select')
+        return
+      case 'Enter':
+        if (sel.length === 1) {
+          const node = store.doc.nodes[sel[0]]
+          if (node && (node.text !== undefined || node.children.length === 0)) {
+            store.setUi({ editingTextId: sel[0] })
+            e.preventDefault()
+          }
+        }
+        return
+    }
+
+    if (mod) {
+      switch (e.key.toLowerCase()) {
+        case 'd':
+          e.preventDefault()
+          if (sel.length > 0) {
+            const ids = duplicateNodes(ctx, sel.map((s) => parsePathId(s).sourceId))
+            store.setSelection(ids)
+            store.recordSelectionAfter()
+          }
+          return
+        case 'g':
+          e.preventDefault()
+          if (e.shiftKey) ungroupNodes(ctx, sel)
+          else groupNodes(ctx, sel)
+          return
+        case 'a':
+          e.preventDefault()
+          store.setSelection([...store.activePage().children])
+          return
+        case 'c':
+          if (sel.length > 0) {
+            e.preventDefault()
+            this.clipboard = copyNodes(ctx, sel.map((s) => parsePathId(s).sourceId))
+            void navigator.clipboard?.writeText(this.clipboard).catch(() => {})
+          }
+          return
+        case 'x':
+          if (sel.length > 0) {
+            e.preventDefault()
+            this.clipboard = copyNodes(ctx, sel.map((s) => parsePathId(s).sourceId))
+            void navigator.clipboard?.writeText(this.clipboard).catch(() => {})
+            deleteNodes(ctx, sel.map((s) => parsePathId(s).sourceId))
+          }
+          return
+        case 'v':
+          if (this.clipboard) {
+            e.preventDefault()
+            pasteHtml(ctx, this.clipboard)
+          }
+          return
+        case ']':
+          e.preventDefault()
+          reorderNodes(ctx, sel, e.altKey ? 'front' : 'forward')
+          return
+        case '[':
+          e.preventDefault()
+          reorderNodes(ctx, sel, e.altKey ? 'back' : 'backward')
+          return
+        case '0':
+          e.preventDefault()
+          this.zoomTo(1)
+          return
+        case '1':
+          e.preventDefault()
+          this.zoomToFit()
+          return
+        case '2':
+          e.preventDefault()
+          this.zoomToSelection()
+          return
+        case '=':
+          e.preventDefault()
+          this.zoomTo(cameraStore.camera.scale * 1.25)
+          return
+        case '-':
+          e.preventDefault()
+          this.zoomTo(cameraStore.camera.scale / 1.25)
+          return
+      }
+      return
+    }
+
+    const toolKeys: Record<string, Tool> = {
+      v: 'select', h: 'hand', f: 'frame', t: 'text', r: 'rect',
+      o: 'ellipse', l: 'line', p: 'polygon', s: 'star', c: 'comment',
+    }
+    const tool = toolKeys[e.key.toLowerCase()]
+    if (tool) {
+      store.setTool(tool)
+      this.setCursor(tool === 'hand' ? 'grab' : SHAPE_TOOLS.has(tool) ? 'crosshair' : '')
+    }
+  }
+
+  private onKeyUp(e: KeyboardEvent) {
+    if (e.code === 'Space') {
+      this.spaceDown = false
+      if (this.gesture.type === 'idle') this.setCursor(this.store.ui.tool === 'hand' ? 'grab' : '')
+    }
+  }
 }
