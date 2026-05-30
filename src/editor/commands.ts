@@ -188,3 +188,83 @@ export function setTextContent(ctx: CommandCtx, id: NodeId, text: string) {
     store.apply('Edit text', [{ t: 'setProps', id, patch: { text } }], src(ctx))
   }
 }
+
+export interface InsertResult {
+  rootIds: NodeId[]
+  dropped: string[]
+}
+
+/** Parse untrusted HTML and insert it at a location, as one transaction. */
+export function insertHtml(
+  ctx: CommandCtx,
+  html: string,
+  at: NodeLocation,
+  label = 'Insert',
+): InsertResult {
+  const { store } = ctx
+  const { nodes, rootIds, dropped } = parseHtml(html, {
+    isIdTaken: (id) => Boolean(store.doc.nodes[id]),
+  })
+  if (rootIds.length === 0) return { rootIds: [], dropped }
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const collect = (id: NodeId): NodeModel[] => {
+    const node = byId.get(id)
+    if (!node) return []
+    return [node, ...node.children.flatMap(collect)]
+  }
+  const ops: Op[] = rootIds.map((rootId, i) => ({
+    t: 'insertTree',
+    nodes: collect(rootId),
+    rootId,
+    at: { ...at, index: at.index + i },
+  }))
+  store.apply(label, ops, src(ctx))
+  return { rootIds, dropped }
+}
+
+/** Serialize nodes to sanitized HTML (the copy payload). */
+export function copyNodes(ctx: CommandCtx, ids: NodeId[]): string {
+  const { store } = ctx
+  return topMostOnly(store, ids)
+    .filter((id) => store.doc.nodes[id])
+    .map((id) => exportHtml(store.doc, id))
+    .join('\n')
+}
+
+export function pasteHtml(ctx: CommandCtx, html: string, offset = 16): NodeId[] {
+  const { store } = ctx
+  const selection = store.ui.selection
+  let at: NodeLocation | null = null
+  if (selection.length > 0) {
+    const first = store.doc.nodes[selection[0]]
+    if (first?.parent) {
+      const parent = store.doc.nodes[first.parent]
+      at = { kind: 'node', parent: first.parent, index: parent.children.length }
+    }
+  }
+  if (!at) {
+    const page = store.activePage()
+    const artboard = page.children.find((id) => store.doc.nodes[id]?.isArtboard)
+    at = artboard
+      ? { kind: 'node', parent: artboard, index: store.doc.nodes[artboard].children.length }
+      : { kind: 'page', pageId: page.id, index: page.children.length }
+  }
+  const { rootIds } = insertHtml(ctx, html, at, 'Paste')
+  if (rootIds.length > 0 && offset !== 0) {
+    const ops: Op[] = []
+    for (const id of rootIds) {
+      const style = store.doc.nodes[id].style
+      const left = px(style.left)
+      const top = px(style.top)
+      if (left !== null && top !== null) {
+        ops.push({ t: 'setStyle', id, set: { left: fmtPx(left + offset), top: fmtPx(top + offset) } })
+      }
+    }
+    // Same user action as the paste; fold into one undo step is nicer, but a
+    // separate offset transaction keeps insertHtml reusable. Acceptable.
+    if (ops.length > 0) store.apply('Paste offset', ops, src(ctx))
+  }
+  store.setSelection(rootIds)
+  store.recordSelectionAfter()
+  return rootIds
+}
