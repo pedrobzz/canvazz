@@ -757,4 +757,117 @@ export class InteractionController {
       if (this.gesture.type === 'idle') this.setCursor(this.store.ui.tool === 'hand' ? 'grab' : '')
     }
   }
+
+  private onDoubleClick(e: MouseEvent) {
+    if (e.target instanceof Element && e.target.closest('[data-cz-ui],[data-handle]')) return
+    const pathId = this.pickPathId(e)
+    if (!pathId) return
+    const chain = this.selectionChain(pathId)
+    const selected = this.store.ui.selection
+    // Descend one level into the clicked chain; at a leaf, start text editing.
+    const idx = chain.findIndex((id) => selected.includes(id))
+    if (idx >= 0 && idx < chain.length - 1) {
+      this.store.setSelection([chain[idx + 1]])
+      return
+    }
+    const deepest = chain[chain.length - 1]
+    const { sourceId, instanceId } = parsePathId(deepest)
+    const node = this.store.doc.nodes[sourceId]
+    if (!instanceId && node && node.children.length === 0 && !node.isArtboard) {
+      this.store.setSelection([deepest])
+      this.store.setUi({ editingTextId: deepest })
+    } else {
+      this.store.setSelection([deepest])
+    }
+  }
+
+  // --- Helpers -------------------------------------------------------------
+
+  private clipboard = ''
+
+  private nextArtboardName(): string {
+    const page = this.store.activePage()
+    const count = page.children.filter((id) => this.store.doc.nodes[id]?.isArtboard).length
+    return `Frame ${count + 1}`
+  }
+
+  private commitTextEdit() {
+    // NodeView owns commit-on-blur; here we only exit the mode.
+    this.store.setUi({ editingTextId: null })
+  }
+
+  private setCursor(cursor: string) {
+    this.viewport.style.cursor = cursor
+  }
+
+  private toWorld(e: { clientX: number; clientY: number }) {
+    const v = this.viewport.getBoundingClientRect()
+    return cameraStore.screenToWorld(e.clientX - v.left, e.clientY - v.top)
+  }
+
+  rectOf(pathId: string): Rect | null {
+    const el = nodeElement(this.world, pathId)
+    return el ? worldRectOf(el, this.viewport, cameraStore.camera) : null
+  }
+
+  private pickPathId(e: { clientX: number; clientY: number }): string | null {
+    for (const el of document.elementsFromPoint(e.clientX, e.clientY)) {
+      if (!(el instanceof HTMLElement)) continue
+      if (el.closest('[data-cz-ui]')) return null
+      const hit = el.closest<HTMLElement>('[data-node-id]')
+      if (hit && this.world.contains(hit)) {
+        const pathId = hit.dataset.nodeId
+        if (!pathId) continue
+        const { sourceId } = parsePathId(pathId)
+        const node = this.store.doc.nodes[parsePathId(pathId).instanceId ?? sourceId]
+        if (node?.locked) continue
+        return pathId
+      }
+    }
+    return null
+  }
+
+  /** Top-level object -> ... -> deepest under cursor, as selectable path ids. */
+  private selectionChain(pathId: string): string[] {
+    const { instanceId } = parsePathId(pathId)
+    const anchor = instanceId ?? pathId
+    const chain: string[] = []
+    let cur: NodeId | null = anchor
+    while (cur) {
+      const node: NodeModel | undefined = this.store.doc.nodes[cur]
+      if (!node) break
+      if (!node.isArtboard) chain.unshift(cur)
+      if (!node.parent || this.store.doc.nodes[node.parent]?.isArtboard) break
+      cur = node.parent
+    }
+    if (instanceId && pathId !== instanceId) chain.push(pathId)
+    return chain.length > 0 ? chain : [pathId]
+  }
+
+  private pickSelection(e: PointerEvent): string | null {
+    const pathId = this.pickPathId(e)
+    if (!pathId) return null
+    const chain = this.selectionChain(pathId)
+    if (e.metaKey || e.ctrlKey) return chain[chain.length - 1]
+    const selected = this.store.ui.selection
+    const existing = chain.find((id) => selected.includes(id))
+    return existing ?? chain[0]
+  }
+
+  private updateHover(e: PointerEvent) {
+    if (e.target instanceof Element && e.target.closest('[data-cz-ui]')) {
+      if (this.store.ui.hoverId) this.store.setUi({ hoverId: null })
+      return
+    }
+    const pathId = this.pickPathId(e)
+    const hover = pathId ? this.pickHoverTarget(pathId, e) : null
+    if (hover !== this.store.ui.hoverId) this.store.setUi({ hoverId: hover })
+  }
+
+  private pickHoverTarget(pathId: string, e: PointerEvent): string {
+    if (e.metaKey || e.ctrlKey) return pathId
+    const chain = this.selectionChain(pathId)
+    const selected = this.store.ui.selection
+    return chain.find((id) => selected.includes(id)) ?? chain[0]
+  }
 }
