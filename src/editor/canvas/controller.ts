@@ -958,4 +958,32 @@ export class InteractionController {
     }
     return hits
   }
+
+  // --- Zoom helpers --------------------------------------------------------
+
+  zoomTo(scale: number) {
+    const v = this.viewport.getBoundingClientRect()
+    cameraStore.zoomAt(v.width / 2, v.height / 2, scale)
+  }
+
+  zoomToFit() {
+    const page = this.store.activePage()
+    const rects = page.children
+      .map((id) => this.rectOf(id))
+      .filter((r): r is Rect => r !== null)
+    const union = unionRects(rects)
+    if (!union) return
+    const v = this.viewport.getBoundingClientRect()
+    cameraStore.fitRect(union, { width: v.width, height: v.height })
+  }
+
+  zoomToSelection() {
+    const rects = this.store.ui.selection
+      .map((id) => this.rectOf(id))
+      .filter((r): r is Rect => r !== null)
+    const union = unionRects(rects)
+    if (!union) return
+    const v = this.viewport.getBoundingClientRect()
+    cameraStore.fitRect(union, { width: v.width, height: v.height })
+  }
 }
