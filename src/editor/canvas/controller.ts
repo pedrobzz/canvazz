@@ -870,4 +870,92 @@ export class InteractionController {
     const selected = this.store.ui.selection
     return chain.find((id) => selected.includes(id)) ?? chain[0]
   }
+
+  /** Frames/artboards under the cursor that could receive dragged nodes. */
+  private dropTargetAt(
+    e: { clientX: number; clientY: number },
+    excluded: NodeId[],
+  ): { id: NodeId; rect: Rect; index: number } | null {
+    const excludedSet = new Set(excluded)
+    for (const el of document.elementsFromPoint(e.clientX, e.clientY)) {
+      if (!(el instanceof HTMLElement)) continue
+      const hit = el.closest<HTMLElement>('[data-node-id]')
+      if (!hit || !this.world.contains(hit)) continue
+      const pathId = hit.dataset.nodeId
+      if (!pathId) continue
+      const { sourceId, instanceId } = parsePathId(pathId)
+      if (instanceId) continue // cannot drop into instances
+      const node = this.store.doc.nodes[sourceId]
+      if (!node || excludedSet.has(sourceId)) continue
+      if (excluded.some((ex) => this.isDescendantOf(sourceId, ex))) continue
+      const isContainer = node.isArtboard || (node.tag === 'div' && node.children.length >= 0 && !node.text)
+      if (!isContainer) continue
+      // Skip if it's the current parent of all dragged nodes (no reparent).
+      if (excluded.length > 0 && excluded.every((id) => this.store.doc.nodes[id]?.parent === sourceId)) {
+        return null
+      }
+      const rect = worldRectOf(hit, this.viewport, cameraStore.camera)
+      return { id: sourceId, rect, index: node.children.length }
+    }
+    return null
+  }
+
+  private isDescendantOf(id: NodeId, maybeAncestor: NodeId): boolean {
+    let cur = this.store.doc.nodes[id]?.parent ?? null
+    while (cur) {
+      if (cur === maybeAncestor) return true
+      cur = this.store.doc.nodes[cur]?.parent ?? null
+    }
+    return false
+  }
+
+  private snapTargetsFor(excluded: NodeId[]): Rect[] {
+    const targets: Rect[] = []
+    const excludedSet = new Set(excluded)
+    const page = this.store.activePage()
+    for (const id of page.children) {
+      if (excludedSet.has(id)) continue
+      const el = nodeElement(this.world, id)
+      if (!el) continue
+      targets.push(worldRectOf(el, this.viewport, cameraStore.camera))
+      // Include first-level children of artboards as snap candidates.
+      const node = this.store.doc.nodes[id]
+      if (node?.isArtboard) {
+        for (const childId of node.children) {
+          if (excludedSet.has(childId)) continue
+          const childEl = nodeElement(this.world, childId)
+          if (childEl) targets.push(worldRectOf(childEl, this.viewport, cameraStore.camera))
+        }
+      }
+    }
+    return targets.slice(0, 400)
+  }
+
+  private marqueeHits(worldRect: Rect): NodeId[] {
+    const hits: NodeId[] = []
+    const page = this.store.activePage()
+    for (const id of page.children) {
+      const node = this.store.doc.nodes[id]
+      const el = nodeElement(this.world, id)
+      if (!node || !el || node.locked || !node.visible) continue
+      const rect = worldRectOf(el, this.viewport, cameraStore.camera)
+      if (node.isArtboard) {
+        if (rectContains(worldRect, rect)) {
+          hits.push(id)
+        } else if (rectsIntersect(worldRect, rect)) {
+          for (const childId of node.children) {
+            const child = this.store.doc.nodes[childId]
+            const childEl = nodeElement(this.world, childId)
+            if (!child || !childEl || child.locked || !child.visible) continue
+            if (rectsIntersect(worldRect, worldRectOf(childEl, this.viewport, cameraStore.camera))) {
+              hits.push(childId)
+            }
+          }
+        }
+      } else if (rectsIntersect(worldRect, rect)) {
+        hits.push(id)
+      }
+    }
+    return hits
+  }
 }
