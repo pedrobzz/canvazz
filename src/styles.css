@@ -101,3 +101,26 @@ body {
   overscroll-behavior: none;
   -webkit-font-smoothing: antialiased;
 }
+
+/* --- Canvas world ---------------------------------------------------------
+ * Canvas content elements get a neutral baseline so the editable DOM behaves
+ * like a clean document, independent of editor chrome styles.
+ */
+[data-canvas-world] {
+  will-change: transform;
+}
+[data-canvas-world] * {
+  box-sizing: border-box;
+}
+[data-canvas-world] img {
+  user-select: none;
+  -webkit-user-drag: none;
+}
+[data-canvas-world] [data-node-id]:not([data-canvas-text]) {
+  user-select: none;
+}
+[data-canvas-text] {
+  outline: none;
+  cursor: text;
+  user-select: text;
+}
