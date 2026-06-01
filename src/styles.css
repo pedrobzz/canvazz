@@ -225,3 +225,30 @@ body {
 .cz-artboard-label-selected {
   color: var(--cz-accent);
 }
+/* --- Editor panels ------------------------------------------------------ */
+.cz-panel {
+  background: var(--cz-panel);
+  color: var(--cz-panel-fg);
+  font-size: 12px;
+}
+.cz-panel input,
+.cz-panel select,
+.cz-panel textarea {
+  background: var(--cz-panel-hover);
+  color: var(--cz-panel-fg);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 3px 6px;
+  width: 100%;
+  min-width: 0;
+}
+.cz-panel input:focus,
+.cz-panel select:focus,
+.cz-panel textarea:focus {
+  outline: none;
+  border-color: var(--cz-accent);
+}
+.cz-panel ::placeholder {
+  color: var(--cz-panel-muted);
+}
