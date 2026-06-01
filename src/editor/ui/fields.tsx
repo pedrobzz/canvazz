@@ -118,3 +118,105 @@ export function NumberField({
     </label>
   )
 }
+
+const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i
+
+/** Best-effort conversion of a CSS color to a hex the native picker accepts. */
+function toPickerHex(value: string): string {
+  if (HEX_RE.test(value)) return value.length === 4
+    ? `#${value[1]}${value[1]}${value[2]}${value[2]}${value[3]}${value[3]}`
+    : value.slice(0, 7)
+  if (typeof document !== 'undefined') {
+    const probe = document.createElement('div')
+    probe.style.color = value
+    if (probe.style.color) {
+      document.body.appendChild(probe)
+      const rgb = getComputedStyle(probe).color.match(/\d+/g)
+      probe.remove()
+      if (rgb && rgb.length >= 3) {
+        return `#${rgb.slice(0, 3).map((c) => (+c).toString(16).padStart(2, '0')).join('')}`
+      }
+    }
+  }
+  return '#000000'
+}
+
+export function ColorField({
+  value,
+  onCommit,
+  label,
+  allowEmpty,
+}: {
+  value: string
+  onCommit: (next: string | null) => void
+  label?: string
+  /** Show a clear button that removes the property. */
+  allowEmpty?: boolean
+}) {
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-1.5">
+      {label ? <span className="w-10 shrink-0 text-[10px] text-[var(--cz-panel-muted)]">{label}</span> : null}
+      <input
+        type="color"
+        className="h-6 w-7 shrink-0 cursor-pointer appearance-none rounded border-none bg-transparent p-0"
+        value={toPickerHex(value || '#000000')}
+        onChange={(e) => onCommit(e.target.value)}
+      />
+      <TextField value={value} onCommit={(v) => onCommit(v || null)} placeholder="none" mono />
+      {allowEmpty && value ? (
+        <button
+          className="shrink-0 text-[10px] text-[var(--cz-panel-muted)] hover:text-[var(--cz-panel-fg)]"
+          onClick={() => onCommit(null)}
+          title="Remove"
+        >
+          ✕
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+export function SelectField({
+  value,
+  options,
+  onCommit,
+  label,
+}: {
+  value: string
+  options: Array<{ value: string; label: string }>
+  onCommit: (next: string) => void
+  label?: string
+}) {
+  return (
+    <label className="flex min-w-0 flex-1 items-center gap-1.5">
+      {label ? <span className="w-10 shrink-0 text-[10px] text-[var(--cz-panel-muted)]">{label}</span> : null}
+      <select value={value} onChange={(e) => onCommit(e.target.value)}>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+export function Section({ title, children, actions }: {
+  title: string
+  children: React.ReactNode
+  actions?: React.ReactNode
+}) {
+  return (
+    <div className="border-b border-[var(--cz-panel-border)] px-3 py-2.5">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[11px] font-semibold text-[var(--cz-panel-fg)]">{title}</span>
+        {actions}
+      </div>
+      <div className="flex flex-col gap-1.5">{children}</div>
+    </div>
+  )
+}
+
+export function Row({ children }: { children: React.ReactNode }) {
+  return <div className="flex items-center gap-2">{children}</div>
+}
