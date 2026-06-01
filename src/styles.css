@@ -124,3 +124,104 @@ body {
   cursor: text;
   user-select: text;
 }
+
+/* --- Selection overlay ------------------------------------------------- */
+.cz-overlay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 10;
+}
+.cz-overlay > div {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: none;
+}
+.cz-hover-box {
+  border: 1.5px solid var(--cz-accent);
+}
+.cz-selection-box {
+  border: 1.5px solid var(--cz-accent);
+}
+.cz-selection-box.cz-selection-editing .cz-handle,
+.cz-selection-box.cz-selection-editing .cz-rotate-zone {
+  display: none;
+}
+.cz-outline {
+  border: 1px solid var(--cz-accent);
+}
+.cz-ai-outline {
+  border: 1.5px solid var(--cz-ai);
+  animation: cz-ai-pulse 1.6s ease-in-out infinite;
+}
+@keyframes cz-ai-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.cz-handle {
+  display: block;
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #fff;
+  border: 1.5px solid var(--cz-accent);
+  border-radius: 2px;
+  pointer-events: auto;
+}
+.cz-handle-nw { top: -5px; left: -5px; }
+.cz-handle-n  { top: -5px; left: calc(50% - 4px); }
+.cz-handle-ne { top: -5px; right: -5px; }
+.cz-handle-e  { top: calc(50% - 4px); right: -5px; }
+.cz-handle-se { bottom: -5px; right: -5px; }
+.cz-handle-s  { bottom: -5px; left: calc(50% - 4px); }
+.cz-handle-sw { bottom: -5px; left: -5px; }
+.cz-handle-w  { top: calc(50% - 4px); left: -5px; }
+.cz-rotate-zone {
+  display: block;
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  pointer-events: auto;
+  cursor: crosshair;
+}
+.cz-rotate-nw { top: -18px; left: -18px; }
+.cz-rotate-ne { top: -18px; right: -18px; }
+.cz-rotate-se { bottom: -18px; right: -18px; }
+.cz-rotate-sw { bottom: -18px; left: -18px; }
+.cz-marquee {
+  background: var(--cz-accent-soft);
+  border: 1px solid var(--cz-accent);
+  opacity: 0.5;
+}
+.cz-snap-guide {
+  background: #f24822;
+}
+.cz-size-badge {
+  background: var(--cz-accent);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  width: max-content !important;
+  height: auto !important;
+}
+.cz-artboard-label {
+  color: var(--cz-panel-muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: auto;
+  cursor: default;
+  width: max-content !important;
+  height: auto !important;
+}
+.cz-artboard-label-selected {
+  color: var(--cz-accent);
+}
