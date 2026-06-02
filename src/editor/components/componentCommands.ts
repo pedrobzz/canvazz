@@ -151,3 +151,89 @@ export function createVariant(
 }
 
 /** Replace an instance with plain nodes (what it currently renders as). */
+export function detachInstance(ctx: Ctx, instanceId: NodeId): NodeId | null {
+  const { store } = ctx
+  const instance = store.doc.nodes[instanceId]
+  if (!instance?.componentId) return null
+  const resolved = resolveNode(store.doc, instanceId)
+  const loc = locate(store, instanceId)
+  if (!resolved || !loc) return null
+
+  const nodes: NodeModel[] = []
+  const build = (r: ResolvedNode, parent: NodeId | null): NodeId => {
+    const id = genId()
+    const node: NodeModel = {
+      id,
+      name: r.name,
+      tag: r.tag,
+      attrs: { ...r.attrs },
+      style: { ...r.style },
+      classes: [...r.classes],
+      text: r.text,
+      children: [],
+      parent,
+      visible: r.visible,
+      locked: false,
+    }
+    nodes.push(node)
+    node.children = r.children.map((c) => build(c, id))
+    return id
+  }
+  const rootId = build(resolved, instance.parent)
+
+  store.apply('Detach instance', [
+    { t: 'remove', id: instanceId },
+    { t: 'insertTree', nodes, rootId, at: loc },
+  ], src(ctx))
+  store.setSelection([rootId])
+  store.recordSelectionAfter()
+  return rootId
+}
+
+/** Sanitized override write (text/style/classes/attrs/visible/swap). */
+export function setInstanceOverride(
+  ctx: Ctx,
+  instanceId: NodeId,
+  sourceId: NodeId,
+  patch: NodeOverride | null,
+): boolean {
+  const { store } = ctx
+  const instance = store.doc.nodes[instanceId]
+  if (!instance?.componentId) return false
+  let safe: NodeOverride | null = null
+  if (patch) {
+    safe = { ...patch }
+    if (safe.style) {
+      safe.style = sanitizeStyle(
+        Object.entries(safe.style).map(([k, v]) => `${k}: ${v}`).join('; '),
+      )
+    }
+    if (safe.classes) safe.classes = sanitizeClasses(safe.classes)
+    if (safe.componentId && !store.doc.components[safe.componentId]) return false
+    if (safe.variantId && !store.doc.components[safe.variantId]) return false
+  }
+  store.apply('Override instance', [
+    { t: 'setOverride', id: instanceId, sourceId, patch: safe },
+  ], src(ctx))
+  return true
+}
+
+export function setInstanceVariant(ctx: Ctx, instanceId: NodeId, variantId: string): boolean {
+  const { store } = ctx
+  const instance = store.doc.nodes[instanceId]
+  if (!instance?.componentId || !store.doc.components[variantId]) return false
+  store.apply('Switch variant', [
+    { t: 'setProps', id: instanceId, patch: { variantId } },
+  ], src(ctx))
+  return true
+}
+
+/** Variants available for an instance's component, if it belongs to a set. */
+export function variantsOf(store: EditorStore, componentId: string) {
+  const def = store.doc.components[componentId]
+  const set = def?.setId ? store.doc.componentSets[def.setId] : null
+  if (!set) return []
+  return set.variantIds
+    .map((id) => store.doc.components[id])
+    .filter((d): d is NonNullable<typeof d> => Boolean(d))
+}
