@@ -207,3 +207,142 @@ function isAncestorOf(maybeAncestor: NodeId, id: NodeId): boolean {
   }
   return false
 }
+
+const LayerRow = memo(function LayerRow({
+  row, selected, hovered, renaming, dropMark,
+  onSelect, onToggleExpand, onRenameStart, onRenameEnd, onDragMark, onDrop,
+}: {
+  row: FlatRow
+  selected: boolean
+  hovered: boolean
+  renaming: boolean
+  dropMark: DropPos | null
+  onSelect: (id: NodeId, e: React.MouseEvent) => void
+  onToggleExpand: (id: NodeId) => void
+  onRenameStart: (id: NodeId) => void
+  onRenameEnd: () => void
+  onDragMark: (id: NodeId, pos: DropPos | null) => void
+  onDrop: (id: NodeId, pos: DropPos) => void
+}) {
+  const { node } = row
+  const isComponent = node.isComponentRoot || Boolean(node.componentId)
+  return (
+    <li
+      role="treeitem"
+      aria-selected={selected}
+      aria-expanded={row.hasChildren ? row.expanded : undefined}
+      aria-level={row.depth + 1}
+      data-layer-id={row.id}
+      draggable={!renaming}
+      className={[
+        'group relative flex h-7 cursor-default select-none items-center gap-1 pr-2 text-[11.5px]',
+        selected
+          ? 'bg-[var(--cz-panel-active)] text-white'
+          : hovered
+            ? 'bg-[var(--cz-panel-hover)]'
+            : 'hover:bg-[var(--cz-panel-hover)]',
+        node.visible ? '' : 'opacity-45',
+        dropMark === 'inside' ? 'ring-1 ring-inset ring-[var(--cz-accent)]' : '',
+      ].join(' ')}
+      style={{ paddingLeft: 8 + row.depth * 14 }}
+      onClick={(e) => onSelect(row.id, e)}
+      onDoubleClick={() => onRenameStart(row.id)}
+      onPointerEnter={() => editorStore.setUi({ hoverId: row.id })}
+      onPointerLeave={() => {
+        if (editorStore.ui.hoverId === row.id) editorStore.setUi({ hoverId: null })
+      }}
+      onDragStart={(e) => {
+        if (!editorStore.ui.selection.includes(row.id)) editorStore.setSelection([row.id])
+        e.dataTransfer.effectAllowed = 'move'
+      }}
+      onDragOver={(e) => {
+        e.preventDefault()
+        const rect = e.currentTarget.getBoundingClientRect()
+        const y = (e.clientY - rect.top) / rect.height
+        const canNest = node.children.length >= 0 && !node.componentId && node.tag === 'div'
+        const pos: DropPos = y < 0.3 ? 'before' : y > 0.7 ? 'after' : canNest ? 'inside' : 'after'
+        onDragMark(row.id, pos)
+      }}
+      onDragLeave={() => onDragMark(row.id, null)}
+      onDrop={(e) => {
+        e.preventDefault()
+        const rect = e.currentTarget.getBoundingClientRect()
+        const y = (e.clientY - rect.top) / rect.height
+        const canNest = node.children.length >= 0 && !node.componentId && node.tag === 'div'
+        const pos: DropPos = y < 0.3 ? 'before' : y > 0.7 ? 'after' : canNest ? 'inside' : 'after'
+        onDrop(row.id, pos)
+      }}
+    >
+      {dropMark === 'before' ? (
+        <div className="absolute inset-x-0 top-0 h-0.5 bg-[var(--cz-accent)]" />
+      ) : null}
+      {dropMark === 'after' ? (
+        <div className="absolute inset-x-0 bottom-0 h-0.5 bg-[var(--cz-accent)]" />
+      ) : null}
+
+      {row.hasChildren ? (
+        <button
+          aria-label={row.expanded ? 'Collapse' : 'Expand'}
+          className="flex size-4 shrink-0 items-center justify-center text-[var(--cz-panel-muted)] hover:text-white"
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggleExpand(row.id)
+          }}
+        >
+          {row.expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+        </button>
+      ) : (
+        <span className="size-4 shrink-0" />
+      )}
+
+      {isComponent ? <Component className="size-3 shrink-0 text-[var(--cz-ai)]" /> : null}
+
+      {renaming ? (
+        <input
+          autoFocus
+          defaultValue={node.name}
+          className="h-5 flex-1"
+          onClick={(e) => e.stopPropagation()}
+          onBlur={(e) => {
+            if (e.target.value.trim() && e.target.value !== node.name) {
+              renameNode({ store: editorStore }, row.id, e.target.value.trim())
+            }
+            onRenameEnd()
+          }}
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+            if (e.key === 'Escape') onRenameEnd()
+          }}
+        />
+      ) : (
+        <span className="truncate">{node.name}</span>
+      )}
+
+      <span className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100">
+        <button
+          aria-label={node.locked ? 'Unlock' : 'Lock'}
+          className={`p-0.5 ${node.locked ? 'text-white opacity-100' : 'text-[var(--cz-panel-muted)] hover:text-white'}`}
+          style={node.locked ? { opacity: 1 } : undefined}
+          onClick={(e) => {
+            e.stopPropagation()
+            setLocked({ store: editorStore }, row.id, !node.locked)
+          }}
+        >
+          {node.locked ? <Lock className="size-3" /> : <LockOpen className="size-3" />}
+        </button>
+        <button
+          aria-label={node.visible ? 'Hide' : 'Show'}
+          className="p-0.5 text-[var(--cz-panel-muted)] hover:text-white"
+          onClick={(e) => {
+            e.stopPropagation()
+            setVisibility({ store: editorStore }, row.id, !node.visible)
+          }}
+        >
+          {node.visible ? <Eye className="size-3" /> : <EyeOff className="size-3" />}
+        </button>
+      </span>
+      {node.locked ? <Lock className="absolute right-2 size-3 text-[var(--cz-panel-muted)] group-hover:hidden" /> : null}
+    </li>
+  )
+})
