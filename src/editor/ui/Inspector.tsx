@@ -439,3 +439,128 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
     </>
   )
 }
+
+function FlexChildSection({ pathId, write }: {
+  pathId: string
+  write: (set: Record<string, string | null>, label?: string) => void
+}) {
+  const { sourceId } = parsePathId(pathId)
+  const node = editorStore.doc.nodes[sourceId]
+  const parent = node?.parent ? editorStore.doc.nodes[node.parent] : null
+  if (!parent || parent.style.display !== 'flex') return null
+  const grow = node.style['flex-grow'] ?? node.style.flex
+  return (
+    <Section title="In auto layout">
+      <SelectField
+        label="Width"
+        value={grow ? 'fill' : 'fixed'}
+        options={[
+          { value: 'fixed', label: 'Fixed / hug' },
+          { value: 'fill', label: 'Fill container' },
+        ]}
+        onCommit={(v) =>
+          write(v === 'fill' ? { 'flex-grow': '1', 'flex-basis': '0', width: null } : { 'flex-grow': null, 'flex-basis': null })
+        }
+      />
+      <SelectField
+        label="Self"
+        value={node.style['align-self'] ?? 'auto'}
+        options={[
+          { value: 'auto', label: 'Auto' },
+          { value: 'flex-start', label: 'Start' },
+          { value: 'center', label: 'Center' },
+          { value: 'flex-end', label: 'End' },
+          { value: 'stretch', label: 'Stretch' },
+        ]}
+        onCommit={(v) => write({ 'align-self': v === 'auto' ? null : v })}
+      />
+    </Section>
+  )
+}
+
+function ComponentSection({ instanceId, componentId, variantId }: {
+  instanceId: NodeId
+  componentId: string
+  variantId?: string
+}) {
+  const def = editorStore.doc.components[componentId]
+  const variants = variantsOf(editorStore, componentId)
+  if (!def) return null
+  return (
+    <Section
+      title="Instance"
+      actions={
+        <Button
+          variant="ghost"
+          className="h-5 px-1.5 text-[10px] text-[var(--cz-panel-muted)] hover:bg-[var(--cz-panel-hover)]"
+          onClick={() => detachInstance({ store: editorStore }, instanceId)}
+        >
+          Detach
+        </Button>
+      }
+    >
+      <div className="text-[10px] text-[var(--cz-ai)]">⬦ {def.name}</div>
+      {variants.length > 1 ? (
+        <SelectField
+          label="Variant"
+          value={variantId ?? componentId}
+          options={variants.map((v) => ({
+            value: v.id,
+            label: v.variantProps?.variant ?? v.name,
+          }))}
+          onCommit={(v) => setInstanceVariant({ store: editorStore }, instanceId, v)}
+        />
+      ) : null}
+      {editorStore.doc.nodes[instanceId]?.overrides &&
+      Object.keys(editorStore.doc.nodes[instanceId].overrides ?? {}).length > 0 ? (
+        <Button
+          variant="ghost"
+          className="h-5 justify-start px-1.5 text-[10px] text-[var(--cz-panel-muted)] hover:bg-[var(--cz-panel-hover)]"
+          onClick={() => {
+            const overrides = editorStore.doc.nodes[instanceId]?.overrides ?? {}
+            editorStore.apply('Reset overrides', Object.keys(overrides).map((sid) => ({
+              t: 'setOverride' as const, id: instanceId, sourceId: sid, patch: null,
+            })))
+          }}
+        >
+          Reset overrides ({Object.keys(editorStore.doc.nodes[instanceId]?.overrides ?? {}).length})
+        </Button>
+      ) : null}
+    </Section>
+  )
+}
+
+function ExportSection({ pathId }: { pathId: string }) {
+  const [copied, setCopied] = useState<'html' | 'jsx' | null>(null)
+  const { sourceId } = parsePathId(pathId)
+  const copy = (kind: 'html' | 'jsx') => {
+    const code = kind === 'html'
+      ? exportHtml(editorStore.doc, sourceId)
+      : exportJsx(editorStore.doc, sourceId)
+    void navigator.clipboard?.writeText(code).catch(() => {})
+    setCopied(kind)
+    setTimeout(() => setCopied(null), 1200)
+  }
+  return (
+    <Section title="Export">
+      <Row>
+        <Button
+          variant="ghost"
+          data-testid="export-html"
+          className="h-6 flex-1 bg-[var(--cz-panel-hover)] text-[11px] hover:bg-[var(--cz-panel-active)] hover:text-white"
+          onClick={() => copy('html')}
+        >
+          {copied === 'html' ? 'Copied!' : 'Copy HTML'}
+        </Button>
+        <Button
+          variant="ghost"
+          data-testid="export-jsx"
+          className="h-6 flex-1 bg-[var(--cz-panel-hover)] text-[11px] hover:bg-[var(--cz-panel-active)] hover:text-white"
+          onClick={() => copy('jsx')}
+        >
+          {copied === 'jsx' ? 'Copied!' : 'Copy JSX'}
+        </Button>
+      </Row>
+    </Section>
+  )
+}
