@@ -67,3 +67,27 @@ export async function saveDocument(doc: DocumentModel): Promise<void> {
     tx.onerror = () => reject(tx.error ?? new Error('IndexedDB write failed'))
   })
 }
+
+/** Wire autosave to a store: debounced save on every doc change. */
+export function startAutosave(store: {
+  subscribeDoc: (fn: () => void) => () => void
+  doc: DocumentModel
+}): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const unsub = store.subscribeDoc(() => {
+    if (timer) clearTimeout(timer)
+    setSaveState('saving')
+    timer = setTimeout(() => {
+      saveDocument(store.doc)
+        .then(() => setSaveState('saved'))
+        .catch((err) => {
+          console.error('Autosave failed:', err)
+          setSaveState('error')
+        })
+    }, 600)
+  })
+  return () => {
+    if (timer) clearTimeout(timer)
+    unsub()
+  }
+}
