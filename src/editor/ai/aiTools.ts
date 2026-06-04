@@ -381,6 +381,84 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     }
     return mutationResult('rename_nodes', renames.map((r) => r.id))
   },
+
+  create_component(args) {
+    const id = args.nodeId as string
+    requireNode(id)
+    const componentId = createMainComponent({ ...AI }, [id])
+    if (!componentId) throw new Error('Cannot create a component from this node (already a component/instance/artboard?)')
+    if (args.name) {
+      const def = store.doc.components[componentId]
+      store.apply('AI: rename component', [
+        { t: 'defineComponent', def: { ...def, name: String(args.name) } },
+      ], 'ai')
+    }
+    return { ...mutationResult('create_component', [id]), componentId }
+  },
+
+  create_variant(args) {
+    const componentId = args.componentId as string
+    if (!store.doc.components[componentId]) throw new Error(`Unknown component: ${componentId}`)
+    const variantId = createVariant({ ...AI }, componentId, String(args.name ?? 'variant'))
+    if (!variantId) throw new Error('Failed to create variant')
+    const def = store.doc.components[variantId]
+    return { ...mutationResult('create_variant', [def.rootId]), variantId, rootId: def.rootId }
+  },
+
+  set_instance_overrides(args) {
+    const instanceId = args.instanceId as string
+    const instance = requireNode(instanceId)
+    if (!instance.componentId) throw new Error(`${instanceId} is not a component instance`)
+    if (args.variantId) {
+      if (!setInstanceVariant({ ...AI }, instanceId, String(args.variantId))) {
+        throw new Error(`Unknown variant: ${String(args.variantId)}`)
+      }
+    }
+    const overrides = (args.overrides as Record<string, Json> | undefined) ?? {}
+    for (const [sourceId, o] of Object.entries(overrides)) {
+      const ok = setInstanceOverride({ ...AI }, instanceId, sourceId, {
+        text: o.text !== undefined ? String(o.text) : undefined,
+        style: o.style as Record<string, string> | undefined,
+        classes: o.classes as string[] | undefined,
+        visible: o.visible as boolean | undefined,
+        componentId: o.componentId as string | undefined,
+        variantId: o.variantId as string | undefined,
+        attrs: o.attrs as Record<string, string> | undefined,
+      })
+      if (!ok) throw new Error(`Failed to apply override for ${sourceId}`)
+    }
+    return mutationResult('set_instance_overrides', [instanceId])
+  },
+
+  select_nodes(args) {
+    const ids = (args.ids as string[]).filter((id) => store.doc.nodes[id])
+    store.setSelection(ids)
+    return { ok: true, selection: ids }
+  },
+
+  export(args) {
+    const id = args.id as string
+    requireNode(id)
+    const format = (args.format as string | undefined) ?? 'html'
+    if (format === 'jsx') return { format, code: exportJsx(store.doc, id) }
+    return { format: 'html', code: exportHtml(store.doc, id) }
+  },
+
+  undo() {
+    const ok = store.undo()
+    return { ok, message: ok ? 'Undid last transaction' : 'Nothing to undo' }
+  },
+
+  finish(args) {
+    // Explicit end-of-task: clear AI indicators, report a final summary.
+    store.setUi({ aiChanged: [] })
+    return {
+      ok: true,
+      summary: String(args.summary ?? ''),
+      log: store.log.slice(-20),
+      nodeCount: Object.keys(store.doc.nodes).length,
+    }
+  },
 }
 
 function collectFrom(nodes: NodeModel[], rootId: string): NodeModel[] {
