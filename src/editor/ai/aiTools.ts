@@ -218,6 +218,79 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     })
     return { dataUrl, width: el.offsetWidth, height: el.offsetHeight }
   },
+
+  // --- Mutations -----------------------------------------------------------
+
+  create_artboard(args) {
+    const name = (args.name as string | undefined) ?? 'Frame'
+    const node = createArtboard(name, {
+      x: (args.x as number | undefined) ?? 0,
+      y: (args.y as number | undefined) ?? 0,
+      width: (args.width as number | undefined) ?? 375,
+      height: (args.height as number | undefined) ?? 667,
+    })
+    const page = store.activePage()
+    store.apply(`AI: create artboard ${name}`, [
+      { t: 'insertTree', nodes: [node], rootId: node.id, at: { kind: 'page', pageId: page.id, index: page.children.length } },
+    ], 'ai')
+    return mutationResult('create_artboard', [node.id])
+  },
+
+  write_html(args) {
+    const html = String(args.html ?? '')
+    if (!html.trim()) throw new Error('html is required')
+    const mode = (args.mode as string | undefined) ?? 'insert'
+    const targetId = args.targetId as string | undefined
+
+    if (mode === 'replace' && targetId) {
+      const target = requireNode(targetId)
+      const at = locate(store, targetId)
+      if (!at) throw new Error(`Node ${targetId} has no location`)
+      // One transaction: remove old, insert new at the same place.
+      const { nodes, rootIds, dropped } = parseHtml(html, {
+        isIdTaken: (pid) => Boolean(store.doc.nodes[pid]),
+      })
+      if (rootIds.length === 0) throw new Error(`Nothing valid to insert. Dropped: ${dropped.join(', ')}`)
+      // Preserve placement of the replaced node when the new root has none.
+      const newRoot = nodes.find((n) => n.id === rootIds[0])
+      if (newRoot && !newRoot.style.position && target.style.position === 'absolute') {
+        newRoot.style = {
+          position: 'absolute',
+          left: target.style.left ?? '0px',
+          top: target.style.top ?? '0px',
+          ...newRoot.style,
+        }
+      }
+      const ops: Op[] = [{ t: 'remove', id: targetId }]
+      rootIds.forEach((rootId, i) => {
+        ops.push({
+          t: 'insertTree',
+          nodes: collectFrom(nodes, rootId),
+          rootId,
+          at: { ...at, index: at.index + i },
+        })
+      })
+      store.apply('AI: replace node', ops, 'ai')
+      store.setSelection(rootIds)
+      return { ...mutationResult('write_html replace', rootIds), dropped }
+    }
+
+    let at: NodeLocation
+    if (mode === 'before' || mode === 'after') {
+      if (!targetId) throw new Error(`mode "${mode}" requires targetId`)
+      const loc = locate(store, targetId)
+      if (!loc) throw new Error(`Node ${targetId} has no location`)
+      at = { ...loc, index: mode === 'after' ? loc.index + 1 : loc.index }
+    } else {
+      at = locationFor(targetId, args.index as number | undefined)
+    }
+    const { rootIds, dropped } = insertHtml({ ...AI }, html, at, 'AI: write html')
+    if (rootIds.length === 0) {
+      throw new Error(`Nothing valid to insert. Dropped: ${dropped.join(', ') || 'everything (malformed HTML?)'}`)
+    }
+    store.setSelection(rootIds)
+    return { ...mutationResult('write_html', rootIds), dropped }
+  },
 }
 
 function collectFrom(nodes: NodeModel[], rootId: string): NodeModel[] {
