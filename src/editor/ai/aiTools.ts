@@ -291,6 +291,96 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     store.setSelection(rootIds)
     return { ...mutationResult('write_html', rootIds), dropped }
   },
+
+  update_styles(args) {
+    const updates = args.updates as Array<{ id: string; set: Record<string, string | null> }>
+    if (!Array.isArray(updates) || updates.length === 0) throw new Error('updates[] is required')
+    const ops: Op[] = []
+    const rejected: string[] = []
+    for (const { id, set } of updates) {
+      requireNode(id)
+      const safe: Record<string, string | null> = {}
+      for (const [prop, value] of Object.entries(set)) {
+        if (value === null) {
+          safe[prop] = null
+          continue
+        }
+        const sanitized = sanitizeStyle(`${prop}: ${value}`)
+        const key = Object.keys(sanitized)[0]
+        if (key) safe[key] = sanitized[key]
+        else rejected.push(`${id}:${prop}`)
+      }
+      if (Object.keys(safe).length > 0) ops.push({ t: 'setStyle', id, set: safe })
+    }
+    if (ops.length === 0) throw new Error(`All style updates rejected: ${rejected.join(', ')}`)
+    const tx = store.apply('AI: update styles', ops, 'ai')
+    return { ...mutationResult('update_styles', tx?.changed ?? []), rejected }
+  },
+
+  set_classes(args) {
+    const id = args.id as string
+    requireNode(id)
+    const classes = sanitizeClasses(String(args.classes ?? ''))
+    store.apply('AI: set classes', [{ t: 'setClasses', id, classes }], 'ai')
+    return { ...mutationResult('set_classes', [id]), classes }
+  },
+
+  set_text_content(args) {
+    const id = args.id as string
+    requireNode(id)
+    setTextContent({ ...AI }, id, String(args.text ?? ''))
+    return mutationResult('set_text_content', [id])
+  },
+
+  move_nodes(args) {
+    const moves = args.moves as Array<{ id: string; parentId?: string; index?: number; x?: number; y?: number }>
+    if (!Array.isArray(moves) || moves.length === 0) throw new Error('moves[] is required')
+    const ops: Op[] = []
+    for (const m of moves) {
+      requireNode(m.id)
+      if (m.parentId !== undefined || m.index !== undefined) {
+        const cur = locate(store, m.id)
+        const to: NodeLocation = m.parentId
+          ? { kind: 'node', parent: m.parentId, index: m.index ?? requireNode(m.parentId).children.length }
+          : m.index !== undefined && cur
+            ? { ...cur, index: m.index }
+            : locationFor(undefined, m.index)
+        ops.push({ t: 'move', id: m.id, to })
+      }
+      const set: Record<string, string> = {}
+      if (m.x !== undefined) set.left = `${m.x}px`
+      if (m.y !== undefined) set.top = `${m.y}px`
+      if (Object.keys(set).length > 0) {
+        set.position = store.doc.nodes[m.id].style.position ?? 'absolute'
+        ops.push({ t: 'setStyle', id: m.id, set })
+      }
+    }
+    const tx = store.apply('AI: move nodes', ops, 'ai')
+    return mutationResult('move_nodes', tx?.changed ?? [])
+  },
+
+  duplicate_nodes(args) {
+    const ids = args.ids as string[]
+    ids.forEach(requireNode)
+    const newIds = duplicateNodes({ ...AI }, ids, (args.offset as number | undefined) ?? 16)
+    return mutationResult('duplicate_nodes', newIds)
+  },
+
+  delete_nodes(args) {
+    const ids = args.ids as string[]
+    ids.forEach(requireNode)
+    const removed = deleteNodes({ ...AI }, ids)
+    return { ok: true, label: 'delete_nodes', changedIds: removed, undoable: true }
+  },
+
+  rename_nodes(args) {
+    const renames = args.renames as Array<{ id: string; name: string }>
+    for (const { id, name } of renames) {
+      requireNode(id)
+      renameNode({ ...AI }, id, String(name).slice(0, 80))
+    }
+    return mutationResult('rename_nodes', renames.map((r) => r.id))
+  },
 }
 
 function collectFrom(nodes: NodeModel[], rootId: string): NodeModel[] {
