@@ -3,43 +3,46 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 
-export async function handleMcpRequest(
-  request: Request,
-  server: McpServer,
-): Promise<Response> {
+/**
+ * Stateless JSON-RPC-over-POST MCP handler. Each request gets a fresh linked
+ * transport pair; the response resolves when the server actually answers
+ * (tool calls can take seconds while the editor works), not on a timer.
+ */
+export async function handleMcpRequest(request: Request, server: McpServer): Promise<Response> {
   try {
-    const jsonRpcRequest = (await request.json()) as JSONRPCMessage
+    const message = (await request.json()) as JSONRPCMessage
 
-    const [clientTransport, serverTransport] =
-      InMemoryTransport.createLinkedPair()
+    // Notifications (no id) get no response body per JSON-RPC.
+    const isNotification = !('id' in message) || message.id === undefined
 
-    let responseData: JSONRPCMessage | null = null
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
 
-    clientTransport.onmessage = (message: JSONRPCMessage) => {
-      responseData = message
-    }
+    const responsePromise = isNotification
+      ? Promise.resolve(null)
+      : new Promise<JSONRPCMessage>((resolve) => {
+          clientTransport.onmessage = (incoming: JSONRPCMessage) => {
+            if ('id' in incoming && incoming.id === (message as { id: number | string }).id) {
+              resolve(incoming)
+            }
+          }
+        })
 
     await server.connect(serverTransport)
-
     await clientTransport.start()
-    await serverTransport.start()
+    await clientTransport.send(message)
 
-    await clientTransport.send(jsonRpcRequest)
-
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('MCP request timed out after 120s')), 120_000),
+    )
+    const responseData = await Promise.race([responsePromise, timeout])
 
     await clientTransport.close()
     await serverTransport.close()
 
-    return Response.json(responseData, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    })
+    if (responseData === null) return new Response(null, { status: 202 })
+    return Response.json(responseData)
   } catch (error) {
     console.error('MCP handler error:', error)
-
-    // Return a JSON-RPC error response
     return Response.json(
       {
         jsonrpc: '2.0',
@@ -50,12 +53,7 @@ export async function handleMcpRequest(
         },
         id: null,
       },
-      {
-        status: 500,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      },
+      { status: 500 },
     )
   }
 }
