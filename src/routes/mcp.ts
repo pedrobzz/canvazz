@@ -234,3 +234,38 @@ server.registerTool('set_instance_overrides', {
     })).optional(),
   },
 }, forward('set_instance_overrides'))
+
+// --- Workflow ---------------------------------------------------------------
+
+server.registerTool('select_nodes', {
+  title: 'Select nodes on canvas',
+  description: 'Highlight nodes for the user (e.g. what you just changed).',
+  inputSchema: { ids: z.array(z.string()) },
+}, forward('select_nodes'))
+
+server.registerTool('export', {
+  title: 'Export node as code',
+  description: 'Production HTML or JSX for a subtree. Lossless: re-importable with identical structure.',
+  inputSchema: { id, format: z.enum(['html', 'jsx']).optional() },
+}, forward('export'))
+
+server.registerTool('undo', {
+  title: 'Undo last edit',
+  description: 'Revert the most recent transaction (yours or the user’s — check the log via finish first if unsure).',
+  inputSchema: {},
+}, forward('undo'))
+
+server.registerTool('finish', {
+  title: 'Finish the task',
+  description:
+    'CALL WHEN DONE. Clears AI change indicators, returns the recent edit log and document stats. Provide a one-line summary of what you did.',
+  inputSchema: { summary: z.string().optional() },
+}, forward('finish'))
+
+export const Route = createFileRoute('/mcp')({
+  server: {
+    handlers: {
+      POST: async ({ request }) => handleMcpRequest(request, server),
+    },
+  },
+})
