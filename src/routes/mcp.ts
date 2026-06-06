@@ -121,3 +121,83 @@ server.registerTool('get_screenshot', {
   description: 'PNG of a node or the first artboard. Use to visually verify your edits.',
   inputSchema: { id: z.string().optional().describe('Node/artboard id; default first artboard') },
 }, forward('get_screenshot', 45_000))
+
+// --- Targeted edits ---------------------------------------------------------
+
+server.registerTool('create_artboard', {
+  title: 'Create artboard',
+  description: 'New top-level artboard (a real DOM container) at world coordinates.',
+  inputSchema: {
+    name: z.string().optional(),
+    x: z.number().optional(), y: z.number().optional(),
+    width: z.number().min(1).optional().describe('Default 375'),
+    height: z.number().min(1).optional().describe('Default 667'),
+  },
+}, forward('create_artboard'))
+
+server.registerTool('write_html', {
+  title: 'Write HTML to the canvas',
+  description:
+    'Insert or replace real HTML/CSS/Tailwind. It is sanitized (scripts/handlers/unsafe CSS stripped — strip reasons returned), parsed into the model, and rendered live. Prefer several small writes over one giant one so the user sees progress. Use style="position:absolute; left/top" for free placement inside artboards, or flex containers for auto-layout.',
+  inputSchema: {
+    html: z.string().min(1).describe('HTML fragment. data-cz-name sets layer names.'),
+    targetId: z.string().optional().describe('Container (insert into) or reference node (before/after/replace)'),
+    mode: z.enum(['insert', 'before', 'after', 'replace']).optional().describe('Default insert (append into targetId or page)'),
+    index: z.number().int().optional().describe('Child index for insert mode'),
+  },
+}, forward('write_html'))
+
+server.registerTool('update_styles', {
+  title: 'Update inline styles',
+  description:
+    'Set/remove inline CSS on specific nodes. Batched into one undoable transaction. Use kebab-case props; null removes. Rejected (unsafe/unknown) props are reported.',
+  inputSchema: {
+    updates: z.array(z.object({
+      id: z.string(),
+      set: z.record(z.string(), z.string().nullable()).describe('e.g. {"background-color": "#fff", "padding": null}'),
+    })).min(1),
+  },
+}, forward('update_styles'))
+
+server.registerTool('set_classes', {
+  title: 'Set Tailwind classes',
+  description: 'Replace a node’s class list (validated; dangerous tokens dropped).',
+  inputSchema: { id, classes: z.string().describe('Space-separated class string') },
+}, forward('set_classes'))
+
+server.registerTool('set_text_content', {
+  title: 'Set text content',
+  description: 'Replace a node’s text. Works on headings, paragraphs, spans, buttons, etc.',
+  inputSchema: { id, text: z.string() },
+}, forward('set_text_content'))
+
+server.registerTool('move_nodes', {
+  title: 'Move / reparent nodes',
+  description: 'Change parent, z-order index, and/or absolute x/y position (px, relative to parent).',
+  inputSchema: {
+    moves: z.array(z.object({
+      id: z.string(),
+      parentId: z.string().optional().describe('New parent (omit to keep)'),
+      index: z.number().int().optional().describe('Child index / z-order'),
+      x: z.number().optional(), y: z.number().optional(),
+    })).min(1),
+  },
+}, forward('move_nodes'))
+
+server.registerTool('duplicate_nodes', {
+  title: 'Duplicate nodes',
+  description: 'Deep-copies subtrees (fresh ids), returns the new ids.',
+  inputSchema: { ids: z.array(z.string()).min(1), offset: z.number().optional().describe('px offset, default 16') },
+}, forward('duplicate_nodes'))
+
+server.registerTool('delete_nodes', {
+  title: 'Delete nodes',
+  description: 'Remove subtrees. Undoable like every other edit.',
+  inputSchema: { ids: z.array(z.string()).min(1) },
+}, forward('delete_nodes'))
+
+server.registerTool('rename_nodes', {
+  title: 'Rename layers',
+  description: 'Set human-readable layer names (keep them meaningful — they round-trip to code).',
+  inputSchema: { renames: z.array(z.object({ id: z.string(), name: z.string().min(1) })).min(1) },
+}, forward('rename_nodes'))
