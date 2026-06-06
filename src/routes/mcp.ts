@@ -201,3 +201,36 @@ server.registerTool('rename_nodes', {
   description: 'Set human-readable layer names (keep them meaningful — they round-trip to code).',
   inputSchema: { renames: z.array(z.object({ id: z.string(), name: z.string().min(1) })).min(1) },
 }, forward('rename_nodes'))
+
+// --- Components -------------------------------------------------------------
+
+server.registerTool('create_component', {
+  title: 'Create component from node',
+  description: 'Turn a subtree into a main component. Instances stay linked and update when it changes.',
+  inputSchema: { nodeId: z.string(), name: z.string().optional() },
+}, forward('create_component'))
+
+server.registerTool('create_variant', {
+  title: 'Add component variant',
+  description: 'Clone a component as a named variant (e.g. "hover", "dark") in its component set.',
+  inputSchema: { componentId: z.string(), name: z.string().min(1) },
+}, forward('create_variant'))
+
+server.registerTool('set_instance_overrides', {
+  title: 'Override a component instance',
+  description:
+    'Per-instance overrides keyed by definition-node id: text, style, classes, visible, attrs, or nested swap (componentId/variantId). Also switches the instance variant via variantId at the top level.',
+  inputSchema: {
+    instanceId: z.string(),
+    variantId: z.string().optional().describe('Switch the instance to this variant'),
+    overrides: z.record(z.string(), z.object({
+      text: z.string().optional(),
+      style: z.record(z.string(), z.string()).optional(),
+      classes: z.array(z.string()).optional(),
+      visible: z.boolean().optional(),
+      attrs: z.record(z.string(), z.string()).optional(),
+      componentId: z.string().optional(),
+      variantId: z.string().optional(),
+    })).optional(),
+  },
+}, forward('set_instance_overrides'))
