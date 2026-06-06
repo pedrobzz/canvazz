@@ -477,5 +477,12 @@ function collectFrom(nodes: NodeModel[], rootId: string): NodeModel[] {
 export async function executeAiTool(tool: string, args: Json): Promise<Json> {
   const executor = aiToolExecutors[tool]
   if (!executor) throw new Error(`Unknown tool: ${tool}`)
-  return await executor(args)
+  const result = await executor(args)
+  // Mutations summarize changed nodes; wait for React to paint them so the
+  // summaries carry live rects and the model doesn't need a follow-up read.
+  if (Array.isArray(result.changedIds) && result.changedIds.length > 0) {
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null))))
+    result.changed = (result.changedIds as NodeId[]).map(summarize).filter(Boolean)
+  }
+  return result
 }
