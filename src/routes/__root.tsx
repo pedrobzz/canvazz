@@ -1,6 +1,4 @@
 import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
-import { TanStackDevtools } from '@tanstack/react-devtools'
 
 import appCss from '../styles.css?url'
 
@@ -16,6 +14,14 @@ export const Route = createRootRoute({
       },
       {
         title: 'Canvazz — AI-first design editor',
+      },
+      {
+        // Belt-and-braces on top of the model sanitizer: no plugins, no
+        // frames, no base hijack, no remote form posts. Script policy stays
+        // host-level (vite dev needs inline/eval); production deployments
+        // should additionally send strict script-src + Trusted Types headers.
+        httpEquiv: 'Content-Security-Policy',
+        content: "object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self'",
       },
     ],
     links: [
@@ -36,17 +42,6 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         {children}
-        <TanStackDevtools
-          config={{
-            position: 'bottom-right',
-          }}
-          plugins={[
-            {
-              name: 'Tanstack Router',
-              render: <TanStackRouterDevtoolsPanel />,
-            },
-          ]}
-        />
         <Scripts />
       </body>
     </html>
