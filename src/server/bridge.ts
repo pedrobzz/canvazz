@@ -17,9 +17,21 @@ interface Client {
   close: () => void
 }
 
-const clients: Client[] = []
-const pending = new Map<string, Pending>()
-let commandCounter = 0
+interface BridgeState {
+  clients: Client[]
+  pending: Map<string, Pending>
+  commandCounter: number
+}
+
+// Vite dev re-instantiates server modules on edit; keeping state on
+// globalThis lets existing SSE connections survive module reloads.
+const state: BridgeState = ((globalThis as Record<string, unknown>).__czBridge ??= {
+  clients: [],
+  pending: new Map(),
+  commandCounter: 0,
+} satisfies BridgeState) as BridgeState
+
+const { clients, pending } = state
 
 export function addBridgeClient(client: Client) {
   clients.push(client)
@@ -48,7 +60,7 @@ export function dispatchToEditor(
       ),
     )
   }
-  const id = `cmd_${++commandCounter}_${Date.now().toString(36)}`
+  const id = `cmd_${++state.commandCounter}_${Date.now().toString(36)}`
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id)
