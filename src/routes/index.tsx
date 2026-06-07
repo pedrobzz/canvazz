@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { CanvasRoot } from '#/editor/canvas/CanvasRoot'
+import { cameraStore } from '#/editor/canvas/camera'
 import { startBridge } from '#/editor/ai/bridgeClient'
 import { editorStore } from '#/editor/store/editorStore'
 import { loadDocument, seedDocument, startAutosave } from '#/editor/store/persistence'
@@ -14,15 +15,19 @@ export const Route = createFileRoute('/')({
   // The editor is a pure client app over browser APIs (DOM geometry,
   // IndexedDB, pointer events); SSR would only render an empty shell.
   ssr: false,
+  validateSearch: (search): { fresh?: boolean } => ({
+    fresh: search.fresh ? true : undefined,
+  }),
   component: EditorPage,
 })
 
 function EditorPage() {
+  const { fresh } = Route.useSearch()
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    void loadDocument().then((saved) => {
+    void (fresh ? Promise.resolve(null) : loadDocument()).then((saved) => {
       if (cancelled) return
       editorStore.replaceDocument(saved ?? seedDocument())
       setReady(true)
@@ -30,7 +35,7 @@ function EditorPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [fresh])
 
   useEffect(() => {
     if (!ready) return
@@ -44,7 +49,7 @@ function EditorPage() {
 
   // Test/debug hook (Playwright asserts against the live store).
   useEffect(() => {
-    ;(window as unknown as Record<string, unknown>).__canvazz = { editorStore }
+    ;(window as unknown as Record<string, unknown>).__canvazz = { editorStore, cameraStore }
   }, [])
 
   if (!ready) {
