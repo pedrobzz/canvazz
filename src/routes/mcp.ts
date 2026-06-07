@@ -216,6 +216,22 @@ server.registerTool('create_variant', {
   inputSchema: { componentId: z.string(), name: z.string().min(1) },
 }, forward('create_variant'))
 
+server.registerTool('create_instance', {
+  title: 'Place a component instance',
+  description: 'Insert a linked instance of a component at x/y (px, relative to parentId or the page).',
+  inputSchema: {
+    componentId: z.string(),
+    parentId: z.string().optional().describe('Container node; default page level'),
+    x: z.number().optional(), y: z.number().optional(),
+  },
+}, forward('create_instance'))
+
+server.registerTool('detach_instance', {
+  title: 'Detach an instance',
+  description: 'Replace an instance with plain editable nodes (what it currently renders as).',
+  inputSchema: { instanceId: z.string() },
+}, forward('detach_instance'))
+
 server.registerTool('set_instance_overrides', {
   title: 'Override a component instance',
   description:
