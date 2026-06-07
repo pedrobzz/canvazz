@@ -63,7 +63,11 @@ export function CanvasRoot() {
     overlayProxy.target = overlay
     controllerRef.current = controller
 
+    // Bring existing content into view once layout has settled.
+    const fitRaf = requestAnimationFrame(() => controller.zoomToFit())
+
     return () => {
+      cancelAnimationFrame(fitRaf)
       controllerRef.current = null
       controller.destroy()
       overlay.destroy()
