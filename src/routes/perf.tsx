@@ -78,3 +78,42 @@ export function generatePerfDoc(totalNodes: number): DocumentModel {
   }
   return doc
 }
+
+function PerfPage() {
+  const { n = 1000 } = Route.useSearch()
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    const t0 = performance.now()
+    editorStore.replaceDocument(generatePerfDoc(n))
+    setReady(true)
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const stats = {
+          nodes: n,
+          mountMs: Math.round((performance.now() - t0) * 10) / 10,
+          domNodes: document.querySelectorAll('[data-node-id]').length,
+        }
+        ;(window as unknown as Record<string, unknown>).__perfStats = stats
+        ;(window as unknown as Record<string, unknown>).__canvazz = { editorStore }
+        console.log('perf stats', JSON.stringify(stats))
+      })
+    })
+  }, [n])
+
+  if (!ready) return <div className="p-8 text-sm">generating…</div>
+  return (
+    <TooltipProvider delayDuration={400}>
+      <div className="flex h-screen flex-col overflow-hidden bg-[var(--cz-canvas-bg)]">
+        <div className="flex min-h-0 flex-1">
+          <LeftPanel />
+          <div className="relative min-w-0 flex-1">
+            <CanvasRoot />
+            <Toolbar />
+          </div>
+          <Inspector />
+        </div>
+      </div>
+    </TooltipProvider>
+  )
+}
