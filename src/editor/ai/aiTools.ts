@@ -9,7 +9,8 @@ import {
   deleteNodes, duplicateNodes, insertHtml, locate, renameNode, setTextContent,
 } from '../commands'
 import {
-  createMainComponent, createVariant, setInstanceOverride, setInstanceVariant,
+  createInstance, createMainComponent, createVariant, detachInstance,
+  setInstanceOverride, setInstanceVariant,
 } from '../components/componentCommands'
 import { createArtboard } from '../model/factory'
 import { editorStore } from '../store/editorStore'
@@ -403,6 +404,26 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     if (!variantId) throw new Error('Failed to create variant')
     const def = store.doc.components[variantId]
     return { ...mutationResult('create_variant', [def.rootId]), variantId, rootId: def.rootId }
+  },
+
+  create_instance(args) {
+    const componentId = args.componentId as string
+    if (!store.doc.components[componentId]) throw new Error(`Unknown component: ${componentId}`)
+    const at = locationFor(args.parentId as string | undefined)
+    const instanceId = createInstance({ ...AI }, componentId, at, {
+      x: (args.x as number | undefined) ?? 0,
+      y: (args.y as number | undefined) ?? 0,
+    })
+    if (!instanceId) throw new Error('Failed to create instance')
+    return { ...mutationResult('create_instance', [instanceId]), instanceId }
+  },
+
+  detach_instance(args) {
+    const instanceId = args.instanceId as string
+    requireNode(instanceId)
+    const rootId = detachInstance({ ...AI }, instanceId)
+    if (!rootId) throw new Error(`${instanceId} is not a component instance`)
+    return { ...mutationResult('detach_instance', [rootId]), rootId }
   },
 
   set_instance_overrides(args) {
