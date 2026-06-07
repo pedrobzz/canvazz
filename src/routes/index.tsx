@@ -41,6 +41,12 @@ function EditorPage() {
       stopBridge()
     }
   }, [ready])
+
+  // Test/debug hook (Playwright asserts against the live store).
+  useEffect(() => {
+    ;(window as unknown as Record<string, unknown>).__canvazz = { editorStore }
+  }, [])
+
   if (!ready) {
     return (
       <div className="flex h-screen items-center justify-center bg-[var(--cz-canvas-bg)] text-sm text-[var(--cz-panel-muted)]">
