@@ -47,6 +47,12 @@ function EditorPage() {
     }
   }, [ready])
 
+  // Runtime Tailwind engine: AI/user-authored utility classes on canvas
+  // nodes compile on the fly (the build-time CSS only covers app chrome).
+  useEffect(() => {
+    void import('@tailwindcss/browser')
+  }, [])
+
   // Test/debug hook (Playwright asserts against the live store).
   useEffect(() => {
     ;(window as unknown as Record<string, unknown>).__canvazz = { editorStore, cameraStore }
