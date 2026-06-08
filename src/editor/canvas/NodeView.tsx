@@ -100,6 +100,9 @@ function EditableText({ node }: { node: NodeModel }) {
     node.text ?? node.children.map((c) => editorStore.doc.nodes[c]?.text ?? '').join('')
 
   useEffect(() => {
+    // StrictMode runs mount -> cleanup -> mount; reset so the second mount
+    // keeps editing and the throwaway cleanup is a no-op.
+    committed.current = false
     const el = ref.current
     if (!el) return
     el.focus()
@@ -108,18 +111,18 @@ function EditableText({ node }: { node: NodeModel }) {
     const sel = window.getSelection()
     sel?.removeAllRanges()
     sel?.addRange(range)
-    return () => commit()
+    return () => commit(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const commit = () => {
-    if (committed.current) return
-    committed.current = true
+  /** Commit text; optionally end editing (cleanup must not end it). */
+  const commit = (clearEditing: boolean) => {
     const el = ref.current
-    if (el && el.textContent !== initialText) {
+    if (!committed.current && el && el.textContent !== initialText) {
+      committed.current = true
       setTextContent({ store: editorStore }, node.id, el.textContent ?? '')
     }
-    if (editorStore.ui.editingTextId === node.id) {
+    if (clearEditing && editorStore.ui.editingTextId === node.id) {
       editorStore.setUi({ editingTextId: null })
     }
   }
@@ -134,12 +137,12 @@ function EditableText({ node }: { node: NodeModel }) {
     contentEditable: true,
     suppressContentEditableWarning: true,
     'data-canvas-text': true,
-    onBlur: commit,
+    onBlur: () => commit(true),
     onKeyDown: (e: React.KeyboardEvent) => {
       e.stopPropagation()
       if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) {
         e.preventDefault()
-        commit()
+        commit(true)
       }
     },
     onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
