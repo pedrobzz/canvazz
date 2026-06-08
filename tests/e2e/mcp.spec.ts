@@ -176,5 +176,6 @@ test('finish clears AI indicators and reports the log', async ({ page }) => {
   }
   expect(done.ok).toBe(true)
   expect(done.log.length).toBeGreaterThan(0)
-  await expect(page.locator('.cz-ai-outline')).toHaveCount(0)
+  // Pooled overlay elements stay in the DOM; they must just be hidden.
+  await expect(page.locator('.cz-ai-outline:visible')).toHaveCount(0)
 })
