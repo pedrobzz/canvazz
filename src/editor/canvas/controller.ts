@@ -8,8 +8,8 @@ import {
   createRectangle, createStar, createText,
 } from '../model/factory'
 import {
-  copyNodes, deleteNodes, duplicateNodes, groupNodes, nudgeNodes,
-  pasteHtml, reorderNodes, topMostOnly, ungroupNodes,
+  canReceiveChildren, copyNodes, deleteNodes, duplicateNodes, groupNodes,
+  nudgeNodes, pasteHtml, reorderNodes, topMostOnly, ungroupNodes,
 } from '../commands'
 import { parsePathId } from '../model/instances'
 import type { Overlay } from './overlay'
@@ -29,7 +29,7 @@ type Gesture =
   | { type: 'marquee'; startX: number; startY: number; additive: boolean; base: NodeId[] }
   | {
       type: 'drag'
-      items: Array<{ id: NodeId; el: HTMLElement; left: number; top: number }>
+      items: Array<DragItem>
       startClientX: number
       startClientY: number
       moved: boolean
@@ -60,8 +60,36 @@ type Gesture =
       tool: Tool
       startWorldX: number
       startWorldY: number
-      container: { parent: NodeId | null; originX: number; originY: number }
+      container: DrawContainer
     }
+
+/**
+ * Dragged node. Absolutely-positioned nodes move via left/top; flow children
+ * of auto-layout containers move via an ephemeral transform and commit as a
+ * reorder/reparent on drop.
+ */
+interface DragItem {
+  id: NodeId
+  el: HTMLElement
+  mode: 'abs' | 'flow'
+  left: number
+  top: number
+}
+
+interface DrawContainer {
+  parent: NodeId | null
+  originX: number
+  originY: number
+  flex: boolean
+  index: number
+}
+
+/** Where a drag would land if released now. */
+type DropInfo =
+  | { kind: 'flex'; id: NodeId; rect: Rect; index: number; guide: SnapGuide }
+  | { kind: 'abs'; id: NodeId; rect: Rect; index: number }
+  | { kind: 'page'; index: number }
+  | null
 
 const SHAPE_TOOLS: ReadonlySet<Tool> = new Set(['frame', 'rect', 'ellipse', 'line', 'polygon', 'star', 'text'])
 
@@ -220,23 +248,45 @@ export class InteractionController {
 
     switch (g.type) {
       case 'drag': {
-        if (!g.moved) break
-        const ops: Op[] = []
-        for (const { id, el } of g.items) {
-          ops.push({ t: 'setStyle', id, set: { left: el.style.left, top: el.style.top } })
+        if (!g.moved) {
+          for (const item of g.items) if (item.mode === 'flow') item.el.style.transform = ''
+          break
         }
-        // Reparent if dropped over a different container.
-        const drop = this.dropTargetAt(e, g.items.map((i) => i.id))
-        if (drop) {
-          for (const { id, el } of g.items) {
-            const rect = worldRectOf(el, this.viewport, cameraStore.camera)
-            const containerRect = drop.rect
-            ops.push({ t: 'move', id, to: { kind: 'node', parent: drop.id, index: drop.index } })
+        const camera = cameraStore.camera
+        const drop = this.dropInfoAt(e, g.items.map((i) => i.id))
+        const ops: Op[] = []
+        for (const item of g.items) {
+          const finalRect = worldRectOf(item.el, this.viewport, camera)
+          if (item.mode === 'flow') item.el.style.transform = ''
+          const node = this.store.doc.nodes[item.id]
+          if (!node) continue
+          if (drop?.kind === 'flex') {
+            // Join the auto-layout flow at the computed index.
+            ops.push({ t: 'move', id: item.id, to: { kind: 'node', parent: drop.id, index: drop.index } })
+            if (node.style.position || node.style.left || node.style.top) {
+              ops.push({ t: 'setStyle', id: item.id, set: { position: null, left: null, top: null } })
+            }
+          } else if (drop?.kind === 'abs') {
+            ops.push({ t: 'move', id: item.id, to: { kind: 'node', parent: drop.id, index: drop.index } })
             ops.push({
-              t: 'setStyle', id,
-              set: { left: fmtPx(rect.x - containerRect.x), top: fmtPx(rect.y - containerRect.y) },
+              t: 'setStyle', id: item.id,
+              set: {
+                position: 'absolute',
+                left: fmtPx(finalRect.x - drop.rect.x),
+                top: fmtPx(finalRect.y - drop.rect.y),
+              },
             })
+          } else if (drop?.kind === 'page') {
+            const page = this.store.activePage()
+            ops.push({ t: 'move', id: item.id, to: { kind: 'page', pageId: page.id, index: drop.index } })
+            ops.push({
+              t: 'setStyle', id: item.id,
+              set: { position: 'absolute', left: fmtPx(finalRect.x), top: fmtPx(finalRect.y) },
+            })
+          } else if (item.mode === 'abs') {
+            ops.push({ t: 'setStyle', id: item.id, set: { left: item.el.style.left, top: item.el.style.top } })
           }
+          // Flow item with nowhere to land snaps back (transform cleared).
         }
         this.store.apply('Move', ops)
         this.store.recordSelectionAfter()
@@ -318,13 +368,18 @@ export class InteractionController {
           dy = Math.round(dy / 8) * 8
         }
         for (const item of g.items) {
-          item.el.style.left = fmtPx(item.left + dx)
-          item.el.style.top = fmtPx(item.top + dy)
+          if (item.mode === 'abs') {
+            item.el.style.left = fmtPx(item.left + dx)
+            item.el.style.top = fmtPx(item.top + dy)
+          } else {
+            item.el.style.transform = `translate(${fmtPx(dx)}, ${fmtPx(dy)})`
+          }
         }
+        // Prospective drop container; flex targets show an insertion line.
+        const drop = this.dropInfoAt(e, g.items.map((i) => i.id))
+        g.dropTarget = drop && drop.kind !== 'page' ? drop.id : null
+        if (drop?.kind === 'flex') guides = [...guides, drop.guide]
         this.overlay.setGuides(guides)
-        // Highlight prospective drop container.
-        const drop = this.dropTargetAt(e, g.items.map((i) => i.id))
-        g.dropTarget = drop?.id ?? null
         break
       }
       case 'resize': {
@@ -435,17 +490,20 @@ export class InteractionController {
 
   private startDrag(ids: NodeId[], e: PointerEvent) {
     const camera = cameraStore.camera
-    const items: Array<{ id: NodeId; el: HTMLElement; left: number; top: number }> = []
+    const items: Array<DragItem> = []
     const roots = topMostOnly(this.store, ids)
     for (const id of roots) {
       const node = this.store.doc.nodes[id]
       const el = nodeElement(this.world, id)
       if (!node || !el || node.locked) continue
-      // Only absolutely-positioned nodes free-drag; flex children reorder via layer tree (v1).
       const left = px(node.style.left)
       const top = px(node.style.top)
-      if (left === null || top === null) continue
-      items.push({ id, el, left, top })
+      if (left !== null && top !== null) {
+        items.push({ id, el, mode: 'abs', left, top })
+      } else {
+        // Flow child (auto-layout): drag via transform, commit as reorder.
+        items.push({ id, el, mode: 'flow', left: 0, top: 0 })
+      }
     }
     if (items.length === 0) return
     const startRects = items.map(({ el }) => worldRectOf(el, this.viewport, camera))
@@ -504,13 +562,20 @@ export class InteractionController {
 
   private startDraw(e: PointerEvent, tool: Tool) {
     const world = this.toWorld(e)
-    // Shapes land in the deepest frame under the cursor; artboards land on the page.
-    let container: { parent: NodeId | null; originX: number; originY: number } = {
-      parent: null, originX: 0, originY: 0,
-    }
+    // Shapes land in the deepest container under the cursor; artboards land
+    // on the page. Auto-layout containers receive flow children at an index.
+    let container: DrawContainer = { parent: null, originX: 0, originY: 0, flex: false, index: 0 }
     if (tool !== 'frame') {
-      const target = this.dropTargetAt(e, [])
-      if (target) container = { parent: target.id, originX: target.rect.x, originY: target.rect.y }
+      const target = this.dropInfoAt(e, [])
+      if (target && target.kind !== 'page') {
+        container = {
+          parent: target.id,
+          originX: target.rect.x,
+          originY: target.rect.y,
+          flex: target.kind === 'flex',
+          index: target.index,
+        }
+      }
     }
     this.gesture = { type: 'draw', tool, startWorldX: world.x, startWorldY: world.y, container }
     this.viewport.setPointerCapture(e.pointerId)
@@ -569,12 +634,21 @@ export class InteractionController {
         return
     }
 
+    // Drawing into an auto-layout container creates a flow child at the
+    // pointer's insertion index instead of an absolute box.
+    if (!inPage && g.container.flex) {
+      delete node.style.position
+      delete node.style.left
+      delete node.style.top
+    }
     const page = this.store.activePage()
     const at = inPage
       ? ({ kind: 'page', pageId: page.id, index: page.children.length } as const)
       : ({
           kind: 'node', parent: g.container.parent as NodeId,
-          index: this.store.doc.nodes[g.container.parent as NodeId]?.children.length ?? 0,
+          index: g.container.flex
+            ? g.container.index
+            : this.store.doc.nodes[g.container.parent as NodeId]?.children.length ?? 0,
         } as const)
     this.store.apply(`Create ${node.name}`, [
       { t: 'insertTree', nodes: [node], rootId: node.id, at },
@@ -762,23 +836,17 @@ export class InteractionController {
     if (e.target instanceof Element && e.target.closest('[data-cz-ui],[data-handle]')) return
     const pathId = this.pickPathId(e)
     if (!pathId) return
-    const chain = this.selectionChain(pathId)
-    const selected = this.store.ui.selection
-    // Descend one level into the clicked chain; at a leaf, start text editing.
-    const idx = chain.findIndex((id) => selected.includes(id))
-    if (idx >= 0 && idx < chain.length - 1) {
-      this.store.setSelection([chain[idx + 1]])
+    // Deep select: double-click jumps straight to the node under the cursor.
+    // Double-clicking it again starts text editing on leaves.
+    if (this.store.ui.selection.includes(pathId)) {
+      const { sourceId, instanceId } = parsePathId(pathId)
+      const node = this.store.doc.nodes[sourceId]
+      if (!instanceId && node && node.children.length === 0 && !node.isArtboard) {
+        this.store.setUi({ editingTextId: pathId })
+      }
       return
     }
-    const deepest = chain[chain.length - 1]
-    const { sourceId, instanceId } = parsePathId(deepest)
-    const node = this.store.doc.nodes[sourceId]
-    if (!instanceId && node && node.children.length === 0 && !node.isArtboard) {
-      this.store.setSelection([deepest])
-      this.store.setUi({ editingTextId: deepest })
-    } else {
-      this.store.setSelection([deepest])
-    }
+    this.store.setSelection([pathId])
   }
 
   // --- Helpers -------------------------------------------------------------
@@ -871,14 +939,12 @@ export class InteractionController {
     return chain.find((id) => selected.includes(id)) ?? chain[0]
   }
 
-  /** Frames/artboards under the cursor that could receive dragged nodes. */
-  private dropTargetAt(
-    e: { clientX: number; clientY: number },
-    excluded: NodeId[],
-  ): { id: NodeId; rect: Rect; index: number } | null {
+  /** Containers under the cursor that could receive dragged/drawn nodes. */
+  private dropInfoAt(e: { clientX: number; clientY: number }, excluded: NodeId[]): DropInfo {
     const excludedSet = new Set(excluded)
     for (const el of document.elementsFromPoint(e.clientX, e.clientY)) {
       if (!(el instanceof HTMLElement)) continue
+      if (el.closest('[data-cz-ui]')) continue
       const hit = el.closest<HTMLElement>('[data-node-id]')
       if (!hit || !this.world.contains(hit)) continue
       const pathId = hit.dataset.nodeId
@@ -888,16 +954,85 @@ export class InteractionController {
       const node = this.store.doc.nodes[sourceId]
       if (!node || excludedSet.has(sourceId)) continue
       if (excluded.some((ex) => this.isDescendantOf(sourceId, ex))) continue
-      const isContainer = node.isArtboard || (node.tag === 'div' && node.children.length >= 0 && !node.text)
-      if (!isContainer) continue
-      // Skip if it's the current parent of all dragged nodes (no reparent).
+      if (!canReceiveChildren(node)) continue
+      const rect = worldRectOf(hit, this.viewport, cameraStore.camera)
+      const display = getComputedStyle(hit).display
+      if (display === 'flex' || display === 'inline-flex') {
+        const { index, guide } = this.flexInsertion(node, hit, rect, e, excludedSet)
+        return { kind: 'flex', id: sourceId, rect, index, guide }
+      }
+      // Same absolute parent for everything dragged: plain move, no reparent.
       if (excluded.length > 0 && excluded.every((id) => this.store.doc.nodes[id]?.parent === sourceId)) {
         return null
       }
-      const rect = worldRectOf(hit, this.viewport, cameraStore.camera)
-      return { id: sourceId, rect, index: node.children.length }
+      return { kind: 'abs', id: sourceId, rect, index: node.children.length }
+    }
+    // Nothing under the cursor: dragging out to the page surface.
+    if (excluded.length > 0 && excluded.some((id) => this.store.doc.nodes[id]?.parent !== null)) {
+      return { kind: 'page', index: this.store.activePage().children.length }
     }
     return null
+  }
+
+  /**
+   * Insertion point inside an auto-layout container: index among flow
+   * children (pointer past their midpoints along the flex axis) plus a
+   * world-space indicator line for the overlay.
+   */
+  private flexInsertion(
+    container: NodeModel,
+    containerEl: HTMLElement,
+    containerRect: Rect,
+    e: { clientX: number; clientY: number },
+    excludedSet: ReadonlySet<NodeId>,
+  ): { index: number; guide: SnapGuide } {
+    const world = this.toWorld(e)
+    const direction = getComputedStyle(containerEl).flexDirection
+    const horizontal = direction.startsWith('row')
+    const reversed = direction.endsWith('reverse')
+
+    const flowRects: Rect[] = []
+    const flowArrayPos: number[] = []
+    let pos = 0
+    for (const childId of container.children) {
+      if (excludedSet.has(childId)) continue // removed before insert
+      const childNode = this.store.doc.nodes[childId]
+      const childEl = childNode ? nodeElement(this.world, childId) : null
+      if (childNode && childEl && childNode.style.position !== 'absolute' && childNode.visible) {
+        flowRects.push(worldRectOf(childEl, this.viewport, cameraStore.camera))
+        flowArrayPos.push(pos)
+      }
+      pos++
+    }
+
+    let flowIndex = 0
+    const pointer = horizontal ? world.x : world.y
+    for (const r of flowRects) {
+      const mid = horizontal ? r.x + r.width / 2 : r.y + r.height / 2
+      if (reversed ? pointer < mid : pointer > mid) flowIndex++
+    }
+    const index =
+      flowIndex < flowArrayPos.length ? flowArrayPos[flowIndex] : pos
+
+    // Indicator line at the insertion gap.
+    let linePos: number
+    if (flowRects.length === 0) {
+      linePos = horizontal ? containerRect.x + 4 : containerRect.y + 4
+    } else if (flowIndex === 0) {
+      const r = flowRects[0]
+      linePos = (horizontal ? r.x : r.y) - 2
+    } else if (flowIndex >= flowRects.length) {
+      const r = flowRects[flowRects.length - 1]
+      linePos = horizontal ? r.x + r.width + 2 : r.y + r.height + 2
+    } else {
+      const a = flowRects[flowIndex - 1]
+      const b = flowRects[flowIndex]
+      linePos = horizontal ? (a.x + a.width + b.x) / 2 : (a.y + a.height + b.y) / 2
+    }
+    const guide: SnapGuide = horizontal
+      ? { axis: 'x', position: linePos, from: containerRect.y + 2, to: containerRect.y + containerRect.height - 2 }
+      : { axis: 'y', position: linePos, from: containerRect.x + 2, to: containerRect.x + containerRect.width - 2 }
+    return { index, guide }
   }
 
   private isDescendantOf(id: NodeId, maybeAncestor: NodeId): boolean {

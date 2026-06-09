@@ -297,6 +297,26 @@ export function locate(store: EditorStore, id: NodeId): NodeLocation | null {
   return null
 }
 
+const NEVER_CONTAINERS = new Set(['img', 'br', 'hr', 'input', 'textarea', 'select', 'option'])
+
+/**
+ * Whether a node can receive dropped/drawn children. Artboards always can;
+ * otherwise any non-void element that isn't a text leaf and either already
+ * has children or declares a layout (flex/grid). Bare shape divs stay solid.
+ */
+export function canReceiveChildren(node: NodeModel): boolean {
+  if (node.componentId || node.text !== undefined || NEVER_CONTAINERS.has(node.tag)) return false
+  if (node.isArtboard || node.children.length > 0) return true
+  return isLayoutContainer(node)
+}
+
+/** Flex/grid container per the model (inline style or Tailwind classes). */
+export function isLayoutContainer(node: NodeModel): boolean {
+  const d = node.style.display
+  if (d === 'flex' || d === 'grid' || d === 'inline-flex') return true
+  return node.classes.some((c) => c === 'flex' || c === 'inline-flex' || c === 'grid')
+}
+
 /** Drop ids that are descendants of other ids in the set. */
 export function topMostOnly(store: EditorStore, ids: NodeId[]): NodeId[] {
   const set = new Set(ids)

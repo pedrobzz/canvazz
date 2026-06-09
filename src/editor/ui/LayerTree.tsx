@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, Component, Eye, EyeOff, Lock, LockOpen } from 'lucide-react'
 import { memo, useEffect, useRef, useState } from 'react'
-import { renameNode, setLocked, setVisibility } from '../commands'
+import { canReceiveChildren, isLayoutContainer, renameNode, setLocked, setVisibility } from '../commands'
 import { editorStore } from '../store/editorStore'
 import { useDocVersion, useUi } from '../store/hooks'
 import type { NodeId, NodeModel } from '../model/types'
@@ -141,9 +141,17 @@ export function LayerTree() {
       if (isAncestorOf(id, targetId)) return
     }
     if (pos === 'inside') {
-      editorStore.apply('Reparent', dragged.map((id) => ({
-        t: 'move' as const, id, to: { kind: 'node' as const, parent: targetId, index: 0 },
-      })))
+      const intoFlow = isLayoutContainer(target)
+      editorStore.apply('Reparent', dragged.flatMap((id) => {
+        const ops: import('../model/types').Op[] = [
+          { t: 'move' as const, id, to: { kind: 'node' as const, parent: targetId, index: 0 } },
+        ]
+        // Joining an auto-layout container means joining the flow.
+        if (intoFlow && doc.nodes[id]?.style.position === 'absolute') {
+          ops.push({ t: 'setStyle' as const, id, set: { position: null, left: null, top: null } })
+        }
+        return ops
+      }))
       return
     }
     // before/after in tree = after/before in child order (tree is reversed).
@@ -259,7 +267,7 @@ const LayerRow = memo(function LayerRow({
         e.preventDefault()
         const rect = e.currentTarget.getBoundingClientRect()
         const y = (e.clientY - rect.top) / rect.height
-        const canNest = node.children.length >= 0 && !node.componentId && node.tag === 'div'
+        const canNest = canReceiveChildren(node)
         const pos: DropPos = y < 0.3 ? 'before' : y > 0.7 ? 'after' : canNest ? 'inside' : 'after'
         onDragMark(row.id, pos)
       }}
@@ -268,7 +276,7 @@ const LayerRow = memo(function LayerRow({
         e.preventDefault()
         const rect = e.currentTarget.getBoundingClientRect()
         const y = (e.clientY - rect.top) / rect.height
-        const canNest = node.children.length >= 0 && !node.componentId && node.tag === 'div'
+        const canNest = canReceiveChildren(node)
         const pos: DropPos = y < 0.3 ? 'before' : y > 0.7 ? 'after' : canNest ? 'inside' : 'after'
         onDrop(row.id, pos)
       }}
