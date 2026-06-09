@@ -128,3 +128,50 @@ Context first → incremental visible writes → exact reads → targeted edits 
 Every mutation is schema-validated (zod), transactional, undoable, and returns changed ids
 *plus* post-paint summaries (name, tag, live rect) so follow-up reads are rarely needed.
 Rejected styles/markup come back as structured `dropped`/`rejected` lists.
+
+## Security
+
+- Allowlist sanitizer at every input boundary (see `compiler/allowlist.ts`); the model never
+  stores an event handler, script, frame, or unsafe URL/CSS value.
+- Untrusted markup is parsed with `DOMParser` (inert — scripts never execute) and rebuilt as
+  model nodes; the canvas renders through React, never `innerHTML`.
+- CSP meta blocks `object-src`/`frame-src`/`base-uri` hijacks. Production deployments should
+  additionally send strict `script-src` + `require-trusted-types-for 'script'` headers (dev
+  needs Vite's inline scripts, so this belongs at the host level).
+- Interactive canvas elements (links, inputs) are rendered inert on the design surface.
+- Image URLs: `https:`, same-origin paths, or base64 `data:image/*` only.
+
+## Performance
+
+Measured by the Playwright perf harness (`tests/e2e/perf.spec.ts`, headless Chromium):
+
+- 1k-node document: ~80ms mount; click-to-paint selection ~76ms (INP budget ≤ 200ms);
+  pan p75 well under 20ms/frame (camera writes bypass React).
+- 10k-node document: ~400ms mount; selection still interactive (~400ms, generous smoke
+  budget — layer tree/inspector rendering dominates, not the canvas).
+- Artboards get `contain: layout style`; overlay work is rAF-batched and pooled.
+
+## Testing
+
+- `tests/unit/` — op inverses/atomicity, sanitizer (scripts/handlers/URLs/CSS/classes),
+  HTML↔model↔HTML round-trips, JSX export, style conversion.
+- `tests/e2e/editor.spec.ts` — select, marquee, drag (+undo/redo), resize, rotate, nudge,
+  draw, in-place text editing, inspector edits, group/ungroup, copy/paste, layer tree
+  (rename/lock/hide), zoom controls, the full component lifecycle, autosave-across-reload.
+- `tests/e2e/mcp.spec.ts` — the live bridge: sanitized writes, round-trips, targeted edits,
+  rejected dangerous CSS, component tools, screenshots, finish/cleanup.
+- `tests/e2e/visual.spec.ts` — canvas screenshots at 50/100/200% zoom.
+- `tests/e2e/perf.spec.ts` — 1k/10k documents, frame-time and INP-style budgets.
+
+## Known limitations (deliberate v1 scope)
+
+- Single page per document in the UI (the model supports multiple pages).
+- Flex (auto-layout) children reorder via the layer tree; on-canvas drag-reorder of flex
+  children is not implemented (absolute-positioned nodes drag/reparent freely).
+- `<style>` blocks in imported HTML are dropped — styling round-trips via inline styles and
+  Tailwind classes.
+- Comments render as pins with prompt-based editing — functional, not polished.
+- No multiplayer. The transactional op log is CRDT-friendly; Convex + presence/cursors is the
+  intended path if/when shared documents are needed.
+- Visual diff for AI edits = change indicators + before/after via `get_screenshot`, not a
+  pixel-diff gate.
