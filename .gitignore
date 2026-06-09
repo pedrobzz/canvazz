@@ -12,3 +12,6 @@ dist-ssr
 __unconfig*
 todos.json
 mcp-todos.json
+# Playwright
+test-results/
+playwright-report/
