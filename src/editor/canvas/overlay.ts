@@ -64,6 +64,7 @@ export function createOverlay({ viewport, world, store, onArtboardLabelPointerDo
   const guidePool: HTMLDivElement[] = []
   const labelPool: HTMLDivElement[] = []
   const aiPool: HTMLDivElement[] = []
+  const commentPool: HTMLDivElement[] = []
 
   let raf = 0
   let hidden = false
@@ -187,6 +188,41 @@ export function createOverlay({ viewport, world, store, onArtboardLabelPointerDo
       labelCount++
     }
     poolTrim(labelPool, labelCount)
+
+    // Comment pins (world-anchored). Click to edit, shift-click to resolve.
+    let pinCount = 0
+    for (const comment of store.doc.comments) {
+      if (comment.resolved) continue
+      const screen = cameraStore.worldToScreen(comment.x, comment.y)
+      const pin = poolGet(commentPool, pinCount, 'cz-comment-pin')
+      pin.textContent = '💬'
+      pin.title = comment.body || 'Empty comment — click to edit'
+      pin.style.transform = `translate(${screen.x - 12}px, ${screen.y - 24}px)`
+      pin.style.display = 'block'
+      if (pin.dataset.commentId !== comment.id) {
+        pin.dataset.commentId = comment.id
+        pin.onpointerdown = (e) => e.stopPropagation()
+        pin.onclick = (e) => {
+          e.stopPropagation()
+          const current = store.doc.comments.find((c) => c.id === comment.id)
+          if (!current) return
+          if (e.shiftKey) {
+            store.apply('Resolve comment', [
+              { t: 'setComment', id: comment.id, patch: { resolved: true } },
+            ])
+            return
+          }
+          const body = window.prompt('Comment', current.body)
+          if (body !== null) {
+            store.apply('Edit comment', [
+              { t: 'setComment', id: comment.id, patch: { body } },
+            ])
+          }
+        }
+      }
+      pinCount++
+    }
+    poolTrim(commentPool, pinCount)
   }
 
   const unsubs = [
