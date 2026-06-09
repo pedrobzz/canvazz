@@ -1,8 +1,9 @@
-import { useSyncExternalStore } from 'react'
-import { Component, Layers, ScrollText, Sparkles, User } from 'lucide-react'
+import { useState, useSyncExternalStore } from 'react'
+import { Check, Component, File, Layers, Plus, ScrollText, Sparkles, User } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cameraStore } from '../canvas/camera'
 import { createInstance } from '../components/componentCommands'
+import { genId } from '../model/ids'
 import { editorStore } from '../store/editorStore'
 import { useDocVersion } from '../store/hooks'
 import { LayerTree } from './LayerTree'
@@ -26,6 +27,10 @@ export function LeftPanel() {
           </TabsTrigger>
         </TabsList>
         <TabsContent value="layers" className="flex min-h-0 flex-1 flex-col">
+          <PagesSection />
+          <div className="px-3 pb-1 pt-2 text-[11px] font-semibold text-[var(--cz-panel-fg)]">
+            Layers
+          </div>
           <LayerTree />
         </TabsContent>
         <TabsContent value="components" className="min-h-0 flex-1 overflow-y-auto">
@@ -35,6 +40,78 @@ export function LeftPanel() {
           <CommandLog />
         </TabsContent>
       </Tabs>
+    </div>
+  )
+}
+
+/** Pages list: switch the visible page, add, and rename inline. */
+function PagesSection() {
+  useDocVersion()
+  const doc = editorStore.doc
+  const [renaming, setRenaming] = useState<string | null>(null)
+
+  return (
+    <div className="border-b border-[var(--cz-panel-border)] pb-1" data-testid="pages">
+      <div className="flex items-center justify-between px-3 py-1.5">
+        <span className="text-[11px] font-semibold text-[var(--cz-panel-fg)]">Pages</span>
+        <button
+          aria-label="Add page"
+          className="rounded p-0.5 text-[var(--cz-panel-muted)] hover:bg-[var(--cz-panel-hover)] hover:text-white"
+          onClick={() => {
+            const page = { id: genId('page'), name: `Page ${doc.pages.length + 1}`, children: [] }
+            editorStore.apply('Add page', [{ t: 'addPage', page, index: doc.pages.length }])
+            editorStore.setActivePage(page.id)
+          }}
+        >
+          <Plus className="size-3.5" />
+        </button>
+      </div>
+      <ul className="max-h-36 overflow-y-auto">
+        {doc.pages.map((page) => {
+          const active = page.id === doc.activePageId
+          return (
+            <li key={page.id}>
+              <div
+                role="button"
+                tabIndex={0}
+                className={`flex w-full cursor-default items-center gap-2 px-3 py-1 text-[11.5px] ${
+                  active ? 'text-white' : 'text-[var(--cz-panel-fg)] hover:bg-[var(--cz-panel-hover)]'
+                }`}
+                onClick={() => editorStore.setActivePage(page.id)}
+                onDoubleClick={() => setRenaming(page.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') editorStore.setActivePage(page.id)
+                }}
+              >
+                <File className="size-3 shrink-0 text-[var(--cz-panel-muted)]" />
+                {renaming === page.id ? (
+                  <input
+                    autoFocus
+                    defaultValue={page.name}
+                    className="h-5 flex-1"
+                    onClick={(e) => e.stopPropagation()}
+                    onBlur={(e) => {
+                      const name = e.target.value.trim()
+                      if (name && name !== page.name) {
+                        editorStore.apply('Rename page', [{ t: 'setPageName', id: page.id, name }])
+                      }
+                      setRenaming(null)
+                    }}
+                    onKeyDown={(e) => {
+                      e.stopPropagation()
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      if (e.key === 'Escape') setRenaming(null)
+                    }}
+                  />
+                ) : (
+                  <span className="truncate">{page.name}</span>
+                )}
+                {active ? <Check className="ml-auto size-3 shrink-0 text-[var(--cz-accent)]" /> : null}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }

@@ -1,6 +1,11 @@
-import { ChevronDown, ChevronRight, Component, Eye, EyeOff, Lock, LockOpen } from 'lucide-react'
+import {
+  ChevronDown, ChevronRight, Columns3, Component, Eye, EyeOff, Frame, Group,
+  Image, List, Lock, LockOpen, MousePointerClick, Rows3, Square, Type,
+} from 'lucide-react'
 import { memo, useEffect, useRef, useState } from 'react'
-import { canReceiveChildren, isLayoutContainer, renameNode, setLocked, setVisibility } from '../commands'
+import {
+  canReceiveChildren, isLayoutContainer, renameNode, setLocked, setVisibility,
+} from '../commands'
 import { editorStore } from '../store/editorStore'
 import { useDocVersion, useUi } from '../store/hooks'
 import type { NodeId, NodeModel } from '../model/types'
@@ -216,6 +221,29 @@ function isAncestorOf(maybeAncestor: NodeId, id: NodeId): boolean {
   return false
 }
 
+
+const TEXT_TAGS = new Set(['p', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'label', 'blockquote', 'code', 'pre', 'strong', 'em'])
+
+/** Figma-style per-layer type icon. */
+function LayerIcon({ node }: { node: NodeModel }) {
+  const cls = 'size-3 shrink-0'
+  if (node.isComponentRoot || node.componentId) {
+    return <Component className={`${cls} text-[var(--cz-ai)]`} />
+  }
+  const muted = `${cls} text-[var(--cz-panel-muted)]`
+  if (node.isArtboard) return <Frame className={muted} />
+  if (node.tag === 'img') return <Image className={muted} />
+  if (node.tag === 'button') return <MousePointerClick className={muted} />
+  if (node.tag === 'ul' || node.tag === 'ol' || node.tag === 'li') return <List className={muted} />
+  if (TEXT_TAGS.has(node.tag) || node.text !== undefined) return <Type className={muted} />
+  if (isLayoutContainer(node)) {
+    const column = (node.style['flex-direction'] ?? '').startsWith('column') || node.classes.includes('flex-col')
+    return column ? <Rows3 className={muted} /> : <Columns3 className={muted} />
+  }
+  if (node.children.length > 0) return <Group className={muted} />
+  return <Square className={muted} />
+}
+
 const LayerRow = memo(function LayerRow({
   row, selected, hovered, renaming, dropMark,
   onSelect, onToggleExpand, onRenameStart, onRenameEnd, onDragMark, onDrop,
@@ -233,7 +261,6 @@ const LayerRow = memo(function LayerRow({
   onDrop: (id: NodeId, pos: DropPos) => void
 }) {
   const { node } = row
-  const isComponent = node.isComponentRoot || Boolean(node.componentId)
   return (
     <li
       role="treeitem"
@@ -303,7 +330,7 @@ const LayerRow = memo(function LayerRow({
         <span className="size-4 shrink-0" />
       )}
 
-      {isComponent ? <Component className="size-3 shrink-0 text-[var(--cz-ai)]" /> : null}
+      <LayerIcon node={node} />
 
       {renaming ? (
         <input

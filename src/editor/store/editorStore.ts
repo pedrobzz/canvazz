@@ -201,6 +201,15 @@ export class EditorStore {
     if (this.ui.tool !== tool) this.setUi({ tool })
   }
 
+  /** Switch the visible page. Not undoable — it's view state, like camera. */
+  setActivePage(id: string) {
+    if (this.doc.activePageId === id || !this.doc.pages.some((p) => p.id === id)) return
+    this.doc = { ...this.doc, activePageId: id }
+    this.setUi({ selection: [], hoverId: null, editingTextId: null, aiChanged: [] })
+    this.docVersion++
+    for (const fn of this.docListeners) fn()
+  }
+
   // --- Queries -------------------------------------------------------------
 
   activePage() {
