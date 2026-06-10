@@ -201,6 +201,65 @@ export function SelectField({
   )
 }
 
+/** Segmented icon toggle (flex direction, text align, …). */
+export function IconRow<T extends string>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+}: {
+  value: T
+  options: Array<{ value: T; icon: React.ReactNode; label: string }>
+  onChange: (next: T) => void
+  ariaLabel?: string
+}) {
+  return (
+    <div role="group" aria-label={ariaLabel} className="flex min-w-0 flex-1 overflow-hidden rounded bg-[var(--cz-panel-hover)]">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          title={o.label}
+          aria-label={o.label}
+          aria-pressed={value === o.value}
+          className={`flex h-6 flex-1 items-center justify-center ${
+            value === o.value
+              ? 'bg-[var(--cz-panel-active)] text-white'
+              : 'text-[var(--cz-panel-muted)] hover:text-white'
+          }`}
+          onClick={() => onChange(o.value)}
+        >
+          {o.icon}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** Row of one-shot action icon buttons (align to parent, …). */
+export function ActionRow({
+  actions,
+}: {
+  actions: Array<{ icon: React.ReactNode; label: string; onClick: () => void }>
+}) {
+  return (
+    <div className="flex min-w-0 flex-1 items-center justify-between rounded bg-[var(--cz-panel-hover)] px-0.5">
+      {actions.map((a) => (
+        <button
+          key={a.label}
+          type="button"
+          title={a.label}
+          aria-label={a.label}
+          className="flex h-6 flex-1 items-center justify-center text-[var(--cz-panel-muted)] hover:text-white"
+          onClick={a.onClick}
+        >
+          {a.icon}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export function Section({ title, children, actions }: {
   title: string
   children: React.ReactNode

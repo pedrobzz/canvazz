@@ -1,8 +1,15 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import {
+  AlignCenter, AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal,
+  AlignEndVertical, AlignJustify, AlignLeft, AlignRight, AlignStartHorizontal,
+  AlignStartVertical, ArrowDown, ArrowRight,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { exportHtml, exportJsx } from '../compiler/export'
 import { isAllowedCssProp, isSafeCssValue, sanitizeClasses, sanitizeUrl } from '../compiler/allowlist'
-import { px } from '../canvas/geometry'
+import { controllerRef } from '../canvas/CanvasRoot'
+import { px, fmtPx } from '../canvas/geometry'
 import { parsePathId } from '../model/instances'
 import {
   createMainComponent, detachInstance, setInstanceOverride, setInstanceVariant, variantsOf,
@@ -10,13 +17,14 @@ import {
 import { renameNode } from '../commands'
 import { editorStore } from '../store/editorStore'
 import { useDocVersion, useUi } from '../store/hooks'
-import { ColorField, NumberField, Row, Section, SelectField, TextField } from './fields'
+import { ActionRow, ColorField, IconRow, NumberField, Row, Section, SelectField, TextField } from './fields'
 import type { NodeId, NodeModel, Op } from '../model/types'
 
 /**
  * Right-hand inspector. Sections adapt to the selection type and write
  * straight to the model (one transaction per commit). Selecting inside a
  * component instance writes overrides instead of touching the definition.
+ * The panel is resizable and never scrolls horizontally.
  */
 
 function writeStyle(pathIds: string[], set: Record<string, string | null>, label = 'Edit style') {
@@ -63,18 +71,74 @@ function effectiveNode(pathId: string): NodeModel | null {
   }
 }
 
+type AlignMode = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom'
+
+/** Align absolutely-positioned nodes within their parent's box. */
+function alignInParent(pathIds: string[], mode: AlignMode) {
+  const ops: Op[] = []
+  for (const pathId of pathIds) {
+    const { instanceId, sourceId } = parsePathId(pathId)
+    if (instanceId && instanceId !== pathId) continue
+    const node = editorStore.doc.nodes[sourceId]
+    if (!node?.parent || node.style.position !== 'absolute') continue
+    const rect = controllerRef.current?.rectOf(sourceId)
+    const parentRect = controllerRef.current?.rectOf(node.parent)
+    if (!rect || !parentRect) continue
+    const set: Record<string, string> = {}
+    if (mode === 'left') set.left = '0px'
+    if (mode === 'hcenter') set.left = fmtPx((parentRect.width - rect.width) / 2)
+    if (mode === 'right') set.left = fmtPx(parentRect.width - rect.width)
+    if (mode === 'top') set.top = '0px'
+    if (mode === 'vcenter') set.top = fmtPx((parentRect.height - rect.height) / 2)
+    if (mode === 'bottom') set.top = fmtPx(parentRect.height - rect.height)
+    ops.push({ t: 'setStyle', id: sourceId, set })
+  }
+  if (ops.length > 0) editorStore.apply('Align', ops)
+}
+
+const MIN_W = 240
+const MAX_W = 440
+
 export function Inspector() {
   useDocVersion()
   const ui = useUi()
   const pathIds = ui.selection
   const first = pathIds[0] ? effectiveNode(pathIds[0]) : null
 
+  const [width, setWidth] = useState(() => {
+    if (typeof window === 'undefined') return 264
+    const saved = Number(window.localStorage.getItem('cz-inspector-w'))
+    return saved >= MIN_W && saved <= MAX_W ? saved : 264
+  })
+  const resizing = useRef<{ startX: number; startW: number } | null>(null)
+
   return (
     <div
       data-cz-ui
       data-testid="inspector"
-      className="cz-panel flex h-full w-60 shrink-0 flex-col overflow-y-auto border-l border-[var(--cz-panel-border)]"
+      style={{ width }}
+      className="cz-panel relative flex h-full shrink-0 flex-col overflow-y-auto overflow-x-hidden border-l border-[var(--cz-panel-border)]"
     >
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize inspector"
+        className="absolute left-0 top-0 z-10 h-full w-1.5 cursor-col-resize hover:bg-[var(--cz-accent)]/50"
+        onPointerDown={(e) => {
+          resizing.current = { startX: e.clientX, startW: width }
+          e.currentTarget.setPointerCapture(e.pointerId)
+        }}
+        onPointerMove={(e) => {
+          if (!resizing.current) return
+          const next = Math.min(MAX_W, Math.max(MIN_W, resizing.current.startW + (resizing.current.startX - e.clientX)))
+          setWidth(next)
+        }}
+        onPointerUp={(e) => {
+          resizing.current = null
+          e.currentTarget.releasePointerCapture(e.pointerId)
+          window.localStorage.setItem('cz-inspector-w', String(width))
+        }}
+      />
       {!first ? <EmptyInspector /> : (
         <SelectionInspector key={pathIds.join(',')} pathIds={pathIds} node={first} />
       )}
@@ -102,7 +166,8 @@ function EmptyInspector() {
       <Section title="Canvas">
         <div className="text-[10px] leading-relaxed text-[var(--cz-panel-muted)]">
           Select a layer to inspect it. Draw with <kbd>F</kbd> frame, <kbd>R</kbd> rectangle,{' '}
-          <kbd>O</kbd> ellipse, <kbd>T</kbd> text. Space-drag pans, ⌘-scroll zooms.
+          <kbd>O</kbd> ellipse, <kbd>T</kbd> text. Space-drag pans, ⌘-scroll zooms. Double-click
+          selects the exact layer under the cursor.
         </div>
       </Section>
     </>
@@ -115,11 +180,30 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
   const multi = pathIds.length > 1
   const s = node.style
   const isInstance = Boolean(node.componentId)
-  const isText = node.text !== undefined || ['p', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'button', 'li'].includes(node.tag)
-  const isContainer = !isInstance && ['div', 'section', 'header', 'footer', 'nav', 'main', 'article', 'aside', 'ul', 'ol'].includes(node.tag)
+  const isText = node.text !== undefined ||
+    ['p', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'button', 'li'].includes(node.tag)
+  const isContainer = !isInstance &&
+    ['div', 'section', 'header', 'footer', 'nav', 'main', 'article', 'aside', 'ul', 'ol'].includes(node.tag)
+  const parent = node.parent ? editorStore.doc.nodes[node.parent] : null
+  const inFlexParent = Boolean(parent && (parent.style.display === 'flex' || parent.classes.includes('flex')))
+  const isAbsolute = s.position === 'absolute'
 
   const write = (set: Record<string, string | null>, label?: string) => writeStyle(pathIds, set, label)
   const writeNum = (prop: string, unit = 'px') => (v: number) => write({ [prop]: `${v}${unit}` })
+
+  /** Paired box values (padding/margin X/Y, gap X/Y) expanding shorthands. */
+  const pairRead = (a: string, shorthand: string) => px(s[a] ?? s[shorthand])
+  const writePair = (props: [string, string], shorthand: string, keepProps: [string, string]) => (v: number) => {
+    const keep = px(s[keepProps[0]] ?? s[shorthand])
+    const set: Record<string, string | null> = {
+      [props[0]]: `${v}px`, [props[1]]: `${v}px`, [shorthand]: null,
+    }
+    if (keep !== null) {
+      set[keepProps[0]] = `${keep}px`
+      set[keepProps[1]] = `${keep}px`
+    }
+    return write(set)
+  }
 
   return (
     <>
@@ -164,14 +248,22 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
         </Section>
       ) : null}
 
-      <Section title="Position & size">
+      <Section title="Position">
+        {isAbsolute ? (
+          <ActionRow
+            actions={[
+              { icon: <AlignStartHorizontal className="size-3.5" />, label: 'Align left', onClick: () => alignInParent(pathIds, 'left') },
+              { icon: <AlignCenterHorizontal className="size-3.5" />, label: 'Align horizontal centers', onClick: () => alignInParent(pathIds, 'hcenter') },
+              { icon: <AlignEndHorizontal className="size-3.5" />, label: 'Align right', onClick: () => alignInParent(pathIds, 'right') },
+              { icon: <AlignStartVertical className="size-3.5" />, label: 'Align top', onClick: () => alignInParent(pathIds, 'top') },
+              { icon: <AlignCenterVertical className="size-3.5" />, label: 'Align vertical centers', onClick: () => alignInParent(pathIds, 'vcenter') },
+              { icon: <AlignEndVertical className="size-3.5" />, label: 'Align bottom', onClick: () => alignInParent(pathIds, 'bottom') },
+            ]}
+          />
+        ) : null}
         <Row>
-          <NumberField label="X" value={px(s.left)} onCommit={writeNum('left')} disabled={px(s.left) === null} />
-          <NumberField label="Y" value={px(s.top)} onCommit={writeNum('top')} disabled={px(s.top) === null} />
-        </Row>
-        <Row>
-          <NumberField label="W" value={px(s.width)} min={1} onCommit={writeNum('width')} />
-          <NumberField label="H" value={px(s.height)} min={1} onCommit={writeNum('height')} />
+          <NumberField label="X" value={px(s.left)} onCommit={writeNum('left')} disabled={!isAbsolute} />
+          <NumberField label="Y" value={px(s.top)} onCommit={writeNum('top')} disabled={!isAbsolute} />
         </Row>
         <Row>
           <NumberField
@@ -180,90 +272,117 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
             unit="deg"
             onCommit={(v) => write({ rotate: v === 0 ? null : `${v}deg` })}
           />
-          <NumberField
-            label="◜"
-            value={px(s['border-radius']) ?? (s['border-radius'] ? null : 0)}
-            min={0}
-            onCommit={writeNum('border-radius')}
+          <SelectField
+            value={s.position ?? 'static'}
+            options={[
+              { value: 'absolute', label: 'Absolute' },
+              { value: 'static', label: 'In layout' },
+              { value: 'relative', label: 'Relative' },
+            ]}
+            onCommit={(v) => write(v === 'static' ? { position: null, left: null, top: null } : { position: v })}
           />
         </Row>
-        <SelectField
-          label="Pos"
-          value={s.position ?? 'static'}
-          options={[
-            { value: 'absolute', label: 'Absolute' },
-            { value: 'static', label: 'In layout' },
-            { value: 'relative', label: 'Relative' },
-          ]}
-          onCommit={(v) => write(v === 'static' ? { position: null, left: null, top: null } : { position: v })}
-        />
       </Section>
 
-      {isContainer ? (
-        <Section title="Layout">
-          <SelectField
-            label="Type"
-            value={s.display ?? 'block'}
-            options={[
-              { value: 'block', label: 'Free (block)' },
-              { value: 'flex', label: 'Auto layout (flex)' },
-              { value: 'grid', label: 'Grid' },
-              { value: 'none', label: 'None' },
-            ]}
-            onCommit={(v) => write({ display: v === 'block' ? null : v })}
-          />
-          {s.display === 'flex' ? (
-            <>
-              <SelectField
-                label="Dir"
-                value={s['flex-direction'] ?? 'row'}
-                options={[
-                  { value: 'row', label: 'Horizontal' },
-                  { value: 'column', label: 'Vertical' },
-                  { value: 'row-reverse', label: 'Horizontal ↩' },
-                  { value: 'column-reverse', label: 'Vertical ↩' },
-                ]}
-                onCommit={(v) => write({ 'flex-direction': v === 'row' ? null : v })}
-              />
-              <SelectField
-                label="Justif"
-                value={s['justify-content'] ?? 'flex-start'}
-                options={[
-                  { value: 'flex-start', label: 'Start' },
-                  { value: 'center', label: 'Center' },
-                  { value: 'flex-end', label: 'End' },
-                  { value: 'space-between', label: 'Space between' },
-                  { value: 'space-around', label: 'Space around' },
-                ]}
-                onCommit={(v) => write({ 'justify-content': v === 'flex-start' ? null : v })}
-              />
-              <SelectField
-                label="Align"
-                value={s['align-items'] ?? 'stretch'}
-                options={[
-                  { value: 'stretch', label: 'Stretch' },
-                  { value: 'flex-start', label: 'Start' },
-                  { value: 'center', label: 'Center' },
-                  { value: 'flex-end', label: 'End' },
-                  { value: 'baseline', label: 'Baseline' },
-                ]}
-                onCommit={(v) => write({ 'align-items': v === 'stretch' ? null : v })}
-              />
-              <Row>
-                <NumberField label="Gap" value={px(s.gap) ?? 0} min={0} onCommit={writeNum('gap')} />
+      <Section title="Layout">
+        <Row>
+          <NumberField label="W" value={px(s.width)} min={1} onCommit={writeNum('width')} />
+          <NumberField label="H" value={px(s.height)} min={1} onCommit={writeNum('height')} />
+        </Row>
+        {isContainer ? (
+          <>
+            <SelectField
+              label="Type"
+              value={s.display ?? 'block'}
+              options={[
+                { value: 'block', label: 'Free (block)' },
+                { value: 'flex', label: 'Auto layout (flex)' },
+                { value: 'grid', label: 'Grid' },
+                { value: 'none', label: 'None' },
+              ]}
+              onCommit={(v) => write({ display: v === 'block' ? null : v })}
+            />
+            {s.display === 'flex' ? (
+              <>
+                <Row>
+                  <IconRow
+                    ariaLabel="Flex direction"
+                    value={(s['flex-direction'] ?? 'row').startsWith('column') ? 'column' : 'row'}
+                    options={[
+                      { value: 'row', icon: <ArrowRight className="size-3.5" />, label: 'Horizontal' },
+                      { value: 'column', icon: <ArrowDown className="size-3.5" />, label: 'Vertical' },
+                    ]}
+                    onChange={(v) => write({ 'flex-direction': v === 'row' ? null : v })}
+                  />
+                  <SelectField
+                    value={s['flex-wrap'] ?? 'nowrap'}
+                    options={[
+                      { value: 'nowrap', label: 'No wrap' },
+                      { value: 'wrap', label: 'Wrap' },
+                    ]}
+                    onCommit={(v) => write({ 'flex-wrap': v === 'nowrap' ? null : v })}
+                  />
+                </Row>
                 <SelectField
-                  value={s['flex-wrap'] ?? 'nowrap'}
+                  label="Justif"
+                  value={s['justify-content'] ?? 'flex-start'}
                   options={[
-                    { value: 'nowrap', label: 'No wrap' },
-                    { value: 'wrap', label: 'Wrap' },
+                    { value: 'flex-start', label: 'Start' },
+                    { value: 'center', label: 'Center' },
+                    { value: 'flex-end', label: 'End' },
+                    { value: 'space-between', label: 'Space between' },
+                    { value: 'space-around', label: 'Space around' },
                   ]}
-                  onCommit={(v) => write({ 'flex-wrap': v === 'nowrap' ? null : v })}
+                  onCommit={(v) => write({ 'justify-content': v === 'flex-start' ? null : v })}
                 />
-              </Row>
-            </>
-          ) : null}
-          <Row>
-            <NumberField label="Pad" value={px(s.padding) ?? 0} min={0} onCommit={writeNum('padding')} />
+                <SelectField
+                  label="Align"
+                  value={s['align-items'] ?? 'stretch'}
+                  options={[
+                    { value: 'stretch', label: 'Stretch' },
+                    { value: 'flex-start', label: 'Start' },
+                    { value: 'center', label: 'Center' },
+                    { value: 'flex-end', label: 'End' },
+                    { value: 'baseline', label: 'Baseline' },
+                  ]}
+                  onCommit={(v) => write({ 'align-items': v === 'stretch' ? null : v })}
+                />
+                <Row>
+                  <NumberField
+                    label="↔"
+                    value={pairRead('column-gap', 'gap')}
+                    min={0}
+                    onCommit={(v) => {
+                      const rowGap = px(s['row-gap'] ?? s.gap)
+                      write({ 'column-gap': `${v}px`, 'row-gap': rowGap !== null ? `${rowGap}px` : `${v}px`, gap: null })
+                    }}
+                  />
+                  <NumberField
+                    label="↕"
+                    value={pairRead('row-gap', 'gap')}
+                    min={0}
+                    onCommit={(v) => {
+                      const colGap = px(s['column-gap'] ?? s.gap)
+                      write({ 'row-gap': `${v}px`, 'column-gap': colGap !== null ? `${colGap}px` : `${v}px`, gap: null })
+                    }}
+                  />
+                </Row>
+              </>
+            ) : null}
+            <Row>
+              <NumberField
+                label="◫"
+                value={pairRead('padding-left', 'padding')}
+                min={0}
+                onCommit={writePair(['padding-left', 'padding-right'], 'padding', ['padding-top', 'padding-bottom'])}
+              />
+              <NumberField
+                label="⊟"
+                value={pairRead('padding-top', 'padding')}
+                min={0}
+                onCommit={writePair(['padding-top', 'padding-bottom'], 'padding', ['padding-left', 'padding-right'])}
+              />
+            </Row>
             <SelectField
               value={s.overflow ?? 'visible'}
               options={[
@@ -273,12 +392,85 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
               ]}
               onCommit={(v) => write({ overflow: v === 'visible' ? null : v })}
             />
-          </Row>
-        </Section>
-      ) : null}
+          </>
+        ) : null}
+        {inFlexParent && !isAbsolute ? (
+          <>
+            <Row>
+              <NumberField
+                label="◧"
+                value={pairRead('margin-left', 'margin')}
+                min={0}
+                onCommit={writePair(['margin-left', 'margin-right'], 'margin', ['margin-top', 'margin-bottom'])}
+              />
+              <NumberField
+                label="⊞"
+                value={pairRead('margin-top', 'margin')}
+                min={0}
+                onCommit={writePair(['margin-top', 'margin-bottom'], 'margin', ['margin-left', 'margin-right'])}
+              />
+            </Row>
+            <SelectField
+              label="Width"
+              value={s['flex-grow'] ?? s.flex ? 'fill' : 'fixed'}
+              options={[
+                { value: 'fixed', label: 'Fixed / hug' },
+                { value: 'fill', label: 'Fill container' },
+              ]}
+              onCommit={(v) =>
+                write(v === 'fill'
+                  ? { 'flex-grow': '1', 'flex-basis': '0', width: null }
+                  : { 'flex-grow': null, 'flex-basis': null })
+              }
+            />
+            <SelectField
+              label="Self"
+              value={s['align-self'] ?? 'auto'}
+              options={[
+                { value: 'auto', label: 'Auto' },
+                { value: 'flex-start', label: 'Start' },
+                { value: 'center', label: 'Center' },
+                { value: 'flex-end', label: 'End' },
+                { value: 'stretch', label: 'Stretch' },
+              ]}
+              onCommit={(v) => write({ 'align-self': v === 'auto' ? null : v })}
+            />
+          </>
+        ) : null}
+      </Section>
 
-      {/* Child-of-flex sizing */}
-      <FlexChildSection pathId={pathIds[0]} write={write} />
+      <Section title="Appearance">
+        <Row>
+          <NumberField
+            label="Op"
+            value={s.opacity ? Math.round(parseFloat(s.opacity) * 100) : 100}
+            min={0}
+            unit="%"
+            onCommit={(v) => write({ opacity: v >= 100 ? null : String(Math.max(0, Math.min(100, v)) / 100) })}
+          />
+          <NumberField
+            label="◜"
+            value={px(s['border-radius']) ?? (s['border-radius'] ? null : 0)}
+            min={0}
+            onCommit={writeNum('border-radius')}
+          />
+        </Row>
+        <label className="flex items-center justify-between text-[11px] text-[var(--cz-panel-fg)]">
+          Clip content
+          <Switch
+            checked={s.overflow === 'hidden'}
+            onCheckedChange={(checked) => write({ overflow: checked ? 'hidden' : null })}
+          />
+        </label>
+        <SelectField
+          label="Blend"
+          value={s['mix-blend-mode'] ?? 'normal'}
+          options={['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'difference'].map((v) => ({
+            value: v, label: v,
+          }))}
+          onCommit={(v) => write({ 'mix-blend-mode': v === 'normal' ? null : v })}
+        />
+      </Section>
 
       <Section title="Fill">
         <ColorField
@@ -306,7 +498,7 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
         ) : null}
       </Section>
 
-      <Section title="Stroke">
+      <Section title="Border">
         <Row>
           <NumberField
             label="W"
@@ -338,6 +530,11 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
 
       {isText ? (
         <Section title="Typography">
+          <TextField
+            value={s['font-family'] ?? ''}
+            placeholder="font family"
+            onCommit={(v) => write({ 'font-family': v || null })}
+          />
           <Row>
             <NumberField label="Size" value={px(s['font-size']) ?? 16} min={1} onCommit={writeNum('font-size')} />
             <SelectField
@@ -368,34 +565,24 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
               onCommit={(v) => write({ 'letter-spacing': v === 0 ? null : `${v}px` })}
             />
           </Row>
-          <SelectField
-            label="Align"
-            value={s['text-align'] ?? 'left'}
-            options={[
-              { value: 'left', label: 'Left' },
-              { value: 'center', label: 'Center' },
-              { value: 'right', label: 'Right' },
-              { value: 'justify', label: 'Justify' },
-            ]}
-            onCommit={(v) => write({ 'text-align': v === 'left' ? null : v })}
-          />
+          <Row>
+            <IconRow
+              ariaLabel="Text align"
+              value={(s['text-align'] as 'left' | 'center' | 'right' | 'justify' | undefined) ?? 'left'}
+              options={[
+                { value: 'left', icon: <AlignLeft className="size-3.5" />, label: 'Left' },
+                { value: 'center', icon: <AlignCenter className="size-3.5" />, label: 'Center' },
+                { value: 'right', icon: <AlignRight className="size-3.5" />, label: 'Right' },
+                { value: 'justify', icon: <AlignJustify className="size-3.5" />, label: 'Justify' },
+              ]}
+              onChange={(v) => write({ 'text-align': v === 'left' ? null : v })}
+            />
+          </Row>
           <ColorField label="Color" value={s.color ?? ''} allowEmpty onCommit={(v) => write({ color: v })} />
-          <TextField
-            value={s['font-family'] ?? ''}
-            placeholder="font family"
-            onCommit={(v) => write({ 'font-family': v || null })}
-          />
         </Section>
       ) : null}
 
       <Section title="Effects">
-        <NumberField
-          label="Op"
-          value={s.opacity ? Math.round(parseFloat(s.opacity) * 100) : 100}
-          min={0}
-          unit="%"
-          onCommit={(v) => write({ opacity: v >= 100 ? null : String(Math.max(0, Math.min(100, v)) / 100) })}
-        />
         <TextField
           value={s['box-shadow'] ?? ''}
           placeholder="box shadow…"
@@ -407,14 +594,6 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
           placeholder="filter: blur(4px)…"
           mono
           onCommit={(v) => write({ filter: v || null })}
-        />
-        <SelectField
-          label="Blend"
-          value={s['mix-blend-mode'] ?? 'normal'}
-          options={['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'difference'].map((v) => ({
-            value: v, label: v,
-          }))}
-          onCommit={(v) => write({ 'mix-blend-mode': v === 'normal' ? null : v })}
         />
       </Section>
 
@@ -437,44 +616,6 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
 
       {!multi ? <ExportSection pathId={pathIds[0]} /> : null}
     </>
-  )
-}
-
-function FlexChildSection({ pathId, write }: {
-  pathId: string
-  write: (set: Record<string, string | null>, label?: string) => void
-}) {
-  const { sourceId } = parsePathId(pathId)
-  const node = editorStore.doc.nodes[sourceId]
-  const parent = node?.parent ? editorStore.doc.nodes[node.parent] : null
-  if (!parent || parent.style.display !== 'flex') return null
-  const grow = node.style['flex-grow'] ?? node.style.flex
-  return (
-    <Section title="In auto layout">
-      <SelectField
-        label="Width"
-        value={grow ? 'fill' : 'fixed'}
-        options={[
-          { value: 'fixed', label: 'Fixed / hug' },
-          { value: 'fill', label: 'Fill container' },
-        ]}
-        onCommit={(v) =>
-          write(v === 'fill' ? { 'flex-grow': '1', 'flex-basis': '0', width: null } : { 'flex-grow': null, 'flex-basis': null })
-        }
-      />
-      <SelectField
-        label="Self"
-        value={node.style['align-self'] ?? 'auto'}
-        options={[
-          { value: 'auto', label: 'Auto' },
-          { value: 'flex-start', label: 'Start' },
-          { value: 'center', label: 'Center' },
-          { value: 'flex-end', label: 'End' },
-          { value: 'stretch', label: 'Stretch' },
-        ]}
-        onCommit={(v) => write({ 'align-self': v === 'auto' ? null : v })}
-      />
-    </Section>
   )
 }
 
