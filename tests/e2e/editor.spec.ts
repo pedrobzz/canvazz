@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { centerOf, dragBy, modifier, nodeField, nodeStyle, openEditor, selection } from './helpers'
+import { centerOf, dragBy, modifier, nodeField, nodeStyle, openEditor, select, selection } from './helpers'
 
 test.beforeEach(async ({ page }) => {
   await openEditor(page)
@@ -118,7 +118,7 @@ test('double-click deep-selects and edits text in place', async ({ page }) => {
 test('inspector edits width and background live', async ({ page }) => {
   const card = await centerOf(page, 'card-1')
   await page.mouse.click(card.x, card.y)
-  const w = page.locator('[data-testid="inspector"] label:has-text("W") input').first()
+  const w = page.locator('select[aria-label="W sizing mode"]').locator('..').locator('input')
   await w.fill('300')
   await w.press('Enter')
   expect(await nodeStyle(page, 'card-1', 'width')).toBe('300px')
@@ -297,4 +297,57 @@ test('inspector color swatch stays compact (no row overflow)', async ({ page }) 
     .locator('[data-testid="inspector"]')
     .evaluate((el) => el.scrollWidth > el.clientWidth)
   expect(overflow).toBe(false)
+})
+
+test('W/H sizing modes: fill is direction-aware, values accept %', async ({ page }) => {
+  // Button is a flow child of the flex-COLUMN card.
+  await select(page, ['button-1'])
+
+  // W: Fill in a column parent = stretch on the cross axis, NOT flex-grow.
+  await page.locator('select[aria-label="W sizing mode"]').selectOption('fill')
+  expect(await nodeStyle(page, 'button-1', 'align-self')).toBe('stretch')
+  expect(await nodeStyle(page, 'button-1', 'flex-grow')).toBeUndefined()
+
+  // H: Fill in a column parent = main axis = flex-grow.
+  await page.locator('select[aria-label="H sizing mode"]').selectOption('fill')
+  expect(await nodeStyle(page, 'button-1', 'flex-grow')).toBe('1')
+  expect(await nodeStyle(page, 'button-1', 'height')).toBeUndefined()
+
+  // Typing a percentage commits it as-is.
+  const wInput = page.locator('select[aria-label="W sizing mode"]').locator('..').locator('input')
+  await wInput.fill('50%')
+  await wInput.press('Enter')
+  expect(await nodeStyle(page, 'button-1', 'width')).toBe('50%')
+
+  // H: Fit hugs content (height removed, grow cleared).
+  await page.locator('select[aria-label="H sizing mode"]').selectOption('fit')
+  expect(await nodeStyle(page, 'button-1', 'flex-grow')).toBeUndefined()
+  expect(await nodeStyle(page, 'button-1', 'height')).toBeUndefined()
+})
+
+test('resize handle works on flow children and pins their size', async ({ page }) => {
+  await select(page, ['button-1'])
+  const handle = await page.locator('.cz-handle-e').boundingBox()
+  expect(handle).not.toBeNull()
+  if (!handle) return
+  await dragBy(page, { x: handle.x + 4, y: handle.y + 4 }, -60, 0)
+  const width = await nodeStyle(page, 'button-1', 'width')
+  expect(width).toMatch(/px$/)
+  expect(parseFloat(width ?? '999')).toBeLessThan(287)
+})
+
+test('instance inspector shows inherited definition styles', async ({ page }) => {
+  // Make the button a component, place an instance, select it.
+  await select(page, ['button-1'])
+  await page.locator('button[aria-label="Create component"]').click()
+  await page.getByRole('tab', { name: 'Assets' }).click()
+  await page.getByRole('button', { name: 'Button', exact: true }).click()
+  const sel = await selection(page)
+  const instanceId = sel[0]
+  expect(await nodeField(page, instanceId, 'componentId')).toBeTruthy()
+  // Fill section shows the definition's background, not "none".
+  const fillValue = page
+    .locator('[data-testid="inspector"] input[type="color"]')
+    .first()
+  await expect(fillValue).toHaveValue('#4f8ef7')
 })

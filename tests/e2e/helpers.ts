@@ -63,3 +63,11 @@ export async function dragBy(page: Page, from: { x: number; y: number }, dx: num
 }
 
 export const modifier = process.platform === 'darwin' ? 'Meta' : 'Control'
+
+/** Set the selection directly (for tests that aren't about picking). */
+export function select(page: Page, ids: string[]): Promise<void> {
+  return page.evaluate((sel) => {
+    const cz = (window as never as { __canvazz: { editorStore: { setSelection(ids: string[]): void } } }).__canvazz
+    cz.editorStore.setSelection(sel)
+  }, ids)
+}

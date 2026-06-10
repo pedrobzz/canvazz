@@ -61,7 +61,7 @@ export function NumberField({
   /** Current numeric value, or null when mixed/unset. */
   value: number | null
   onCommit: (next: number) => void
-  label?: string
+  label?: React.ReactNode
   step?: number
   min?: number
   unit?: string
@@ -198,6 +198,131 @@ export function SelectField({
         ))}
       </select>
     </label>
+  )
+}
+
+export type SizeMode = 'fixed' | 'fit' | 'fill'
+
+/**
+ * Figma-style dimension field: a value input (accepts `300` or `50%`) plus a
+ * Fixed / Fit / Fill mode dropdown. Typing a value implies Fixed.
+ */
+export function SizeField({
+  label,
+  mode,
+  display,
+  onFixed,
+  onMode,
+}: {
+  label: string
+  mode: SizeMode
+  /** Shown when fixed: a number (px) or a percentage string. */
+  display: string
+  onFixed: (raw: string) => void
+  onMode: (mode: SizeMode) => void
+}) {
+  const shown = mode === 'fixed' ? display : ''
+  const [draft, setDraft] = useState(shown)
+  const focused = useRef(false)
+  useEffect(() => {
+    if (!focused.current) setDraft(shown)
+  }, [shown])
+
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-1">
+      <span className="w-3 shrink-0 text-[10px] text-[var(--cz-panel-muted)]">{label}</span>
+      <label className="min-w-0 flex-1">
+        <input
+          value={draft}
+          placeholder={mode === 'fit' ? 'Fit' : mode === 'fill' ? 'Fill' : ''}
+          inputMode="decimal"
+          onFocus={() => (focused.current = true)}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={(e) => {
+            focused.current = false
+            const raw = e.target.value.trim()
+            if (raw && raw !== shown) onFixed(raw)
+            else if (!raw) setDraft(shown)
+          }}
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+            if (e.key === 'Escape') {
+              setDraft(shown)
+              ;(e.target as HTMLInputElement).blur()
+            }
+          }}
+        />
+      </label>
+      <select
+        aria-label={`${label} sizing mode`}
+        className="shrink-0"
+        // Inline width: the unlayered .cz-panel select rule sets width:100%.
+        style={{ width: 58 }}
+        value={mode}
+        onChange={(e) => {
+          const next = e.target.value as SizeMode
+          if (next === 'fixed') onFixed(display || '')
+          else onMode(next)
+        }}
+      >
+        <option value="fixed">Fixed</option>
+        <option value="fit">Fit</option>
+        <option value="fill">Fill</option>
+      </select>
+    </div>
+  )
+}
+
+const ALIGN_VALUES = ['flex-start', 'center', 'flex-end'] as const
+
+/**
+ * Figma's 3×3 alignment matrix for auto-layout containers. One click sets
+ * both justify-content (main axis) and align-items (cross axis).
+ */
+export function AlignmentGrid({
+  direction,
+  justify,
+  align,
+  onChange,
+}: {
+  direction: 'row' | 'column'
+  justify: string
+  align: string
+  onChange: (justify: string, align: string) => void
+}) {
+  const j = justify || 'flex-start'
+  const a = align || 'stretch'
+  return (
+    <div
+      role="group"
+      aria-label="Alignment"
+      className="grid w-[66px] shrink-0 grid-cols-3 gap-px rounded bg-[var(--cz-panel-hover)] p-1"
+    >
+      {[0, 1, 2].flatMap((rowI) =>
+        [0, 1, 2].map((colI) => {
+          const cellJ = direction === 'row' ? ALIGN_VALUES[colI] : ALIGN_VALUES[rowI]
+          const cellA = direction === 'row' ? ALIGN_VALUES[rowI] : ALIGN_VALUES[colI]
+          const active = j === cellJ && a === cellA
+          return (
+            <button
+              key={`${rowI}-${colI}`}
+              type="button"
+              title={`${cellJ.replace('flex-', '')} / ${cellA.replace('flex-', '')}`}
+              aria-pressed={active}
+              className="flex h-4 items-center justify-center rounded-sm hover:bg-[var(--cz-panel-active)]"
+              onClick={() => onChange(cellJ, cellA)}
+            >
+              <span
+                className={`rounded-full ${
+                  active ? 'size-2 bg-[var(--cz-accent)]' : 'size-1 bg-[var(--cz-panel-muted)]'
+                }`}
+              />
+            </button>
+          )
+        }),
+      )}
+    </div>
   )
 }
 

@@ -2,7 +2,8 @@ import { useRef, useState } from 'react'
 import {
   AlignCenter, AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal,
   AlignEndVertical, AlignJustify, AlignLeft, AlignRight, AlignStartHorizontal,
-  AlignStartVertical, ArrowDown, ArrowRight,
+  AlignStartVertical, ArrowDown, ArrowLeftRight, ArrowRight, ArrowUpDown,
+  MoveHorizontal, MoveVertical, UnfoldHorizontal, UnfoldVertical,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -10,14 +11,18 @@ import { exportHtml, exportJsx } from '../compiler/export'
 import { isAllowedCssProp, isSafeCssValue, sanitizeClasses, sanitizeUrl } from '../compiler/allowlist'
 import { controllerRef } from '../canvas/CanvasRoot'
 import { px, fmtPx } from '../canvas/geometry'
-import { parsePathId } from '../model/instances'
+import { effectiveComponentRoot, parsePathId } from '../model/instances'
 import {
   createMainComponent, detachInstance, setInstanceOverride, setInstanceVariant, variantsOf,
 } from '../components/componentCommands'
 import { renameNode } from '../commands'
 import { editorStore } from '../store/editorStore'
 import { useDocVersion, useUi } from '../store/hooks'
-import { ActionRow, ColorField, IconRow, NumberField, Row, Section, SelectField, TextField } from './fields'
+import {
+  ActionRow, AlignmentGrid, ColorField, IconRow, NumberField, Row, Section,
+  SelectField, SizeField, TextField,
+} from './fields'
+import type { SizeMode } from './fields'
 import type { NodeId, NodeModel, Op } from '../model/types'
 
 /**
@@ -58,7 +63,26 @@ function effectiveNode(pathId: string): NodeModel | null {
   const { instanceId, sourceId } = parsePathId(pathId)
   const base = editorStore.doc.nodes[sourceId]
   if (!base) return null
-  if (!instanceId || instanceId === pathId) return base
+  if (!instanceId || instanceId === pathId) {
+    // Instance roots inherit the component definition's styling (the canvas
+    // renders def style under instance style); mirror that here so the
+    // inspector shows what is actually painted.
+    if (base.componentId) {
+      const rootId = effectiveComponentRoot(editorStore.doc, base)
+      const defRoot = rootId ? editorStore.doc.nodes[rootId] : null
+      if (defRoot) {
+        return {
+          ...base,
+          tag: defRoot.tag,
+          style: { ...defRoot.style, ...base.style },
+          classes: base.classes.length > 0 ? base.classes : defRoot.classes,
+          text: base.text ?? defRoot.text,
+          attrs: { ...defRoot.attrs, ...base.attrs },
+        }
+      }
+    }
+    return base
+  }
   const override = editorStore.doc.nodes[instanceId]?.overrides?.[sourceId]
   if (!override) return base
   return {
@@ -191,8 +215,88 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
   const write = (set: Record<string, string | null>, label?: string) => writeStyle(pathIds, set, label)
   const writeNum = (prop: string, unit = 'px') => (v: number) => write({ [prop]: `${v}${unit}` })
 
-  /** Paired box values (padding/margin X/Y, gap X/Y) expanding shorthands. */
-  const pairRead = (a: string, shorthand: string) => px(s[a] ?? s[shorthand])
+  // --- Figma-style sizing: Fixed / Fit / Fill per axis, direction-aware.
+  // In a flex parent, "fill" along the main axis means flex-grow; along the
+  // cross axis it means align-self: stretch. Outside flex it means 100%.
+  const parentDirRaw = parent?.style['flex-direction'] ?? (parent?.classes.includes('flex-col') ? 'column' : 'row')
+  const parentRow = !String(parentDirRaw).startsWith('column')
+  const flowChild = inFlexParent && !isAbsolute
+  const axisInfo = (axis: 'w' | 'h') => ({
+    prop: axis === 'w' ? 'width' : 'height',
+    main: flowChild && (axis === 'w') === parentRow,
+    cross: flowChild && (axis === 'w') !== parentRow,
+  })
+
+  const sizeOf = (axis: 'w' | 'h'): { mode: SizeMode; display: string } => {
+    const { prop, main, cross } = axisInfo(axis)
+    const v = s[prop]
+    if (v) {
+      if (v === '100%') return { mode: 'fill', display: '' }
+      if (v === 'fit-content' || v === 'max-content' || v === 'auto') return { mode: 'fit', display: '' }
+      const n = px(v)
+      return { mode: 'fixed', display: n !== null ? String(n) : v }
+    }
+    if (main) return s['flex-grow'] || s.flex ? { mode: 'fill', display: '' } : { mode: 'fit', display: '' }
+    if (cross) {
+      return s['align-self'] && s['align-self'] !== 'stretch'
+        ? { mode: 'fit', display: '' }
+        : { mode: 'fill', display: '' }
+    }
+    if (axis === 'w' && !isAbsolute && parent) return { mode: 'fill', display: '' } // block fills
+    return { mode: 'fit', display: '' }
+  }
+
+  const applySizeFixed = (axis: 'w' | 'h') => (raw: string) => {
+    const { prop, main, cross } = axisInfo(axis)
+    const trimmed = raw.trim()
+    let value: string
+    if (/^-?[\d.]+%$/.test(trimmed)) {
+      value = trimmed
+    } else {
+      const n = parseFloat(trimmed)
+      if (Number.isNaN(n)) {
+        // Switching to Fixed without a value freezes the rendered size.
+        const rect = controllerRef.current?.rectOf(pathIds[0])
+        value = `${Math.round((axis === 'w' ? rect?.width : rect?.height) ?? 100)}px`
+      } else {
+        value = `${Math.max(1, n)}px`
+      }
+    }
+    const set: Record<string, string | null> = { [prop]: value }
+    if (main) {
+      set['flex-grow'] = null
+      set['flex-basis'] = null
+    }
+    if (cross && s['align-self'] === 'stretch') set['align-self'] = null
+    write(set, 'Resize')
+  }
+
+  const applySizeMode = (axis: 'w' | 'h') => (mode: SizeMode) => {
+    const { prop, main, cross } = axisInfo(axis)
+    const set: Record<string, string | null> = {}
+    if (mode === 'fit') {
+      set[prop] = axis === 'w' ? 'fit-content' : null
+      if (main) {
+        set['flex-grow'] = null
+        set['flex-basis'] = null
+      }
+      if (cross) set['align-self'] = 'flex-start'
+    } else if (mode === 'fill') {
+      if (main) {
+        set['flex-grow'] = '1'
+        set['flex-basis'] = '0'
+        set[prop] = null
+      } else if (cross) {
+        set['align-self'] = 'stretch'
+        set[prop] = null
+      } else {
+        set[prop] = '100%'
+      }
+    }
+    write(set, 'Resize')
+  }
+
+  /** Paired box writes (padding/margin X/Y) expanding shorthands. */
   const writePair = (props: [string, string], shorthand: string, keepProps: [string, string]) => (v: number) => {
     const keep = px(s[keepProps[0]] ?? s[shorthand])
     const set: Record<string, string | null> = {
@@ -286,8 +390,8 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
 
       <Section title="Layout">
         <Row>
-          <NumberField label="W" value={px(s.width)} min={1} onCommit={writeNum('width')} />
-          <NumberField label="H" value={px(s.height)} min={1} onCommit={writeNum('height')} />
+          <SizeField label="W" {...sizeOf('w')} onFixed={applySizeFixed('w')} onMode={applySizeMode('w')} />
+          <SizeField label="H" {...sizeOf('h')} onFixed={applySizeFixed('h')} onMode={applySizeMode('h')} />
         </Row>
         {isContainer ? (
           <>
@@ -323,62 +427,49 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
                     onCommit={(v) => write({ 'flex-wrap': v === 'nowrap' ? null : v })}
                   />
                 </Row>
-                <SelectField
-                  label="Justif"
-                  value={s['justify-content'] ?? 'flex-start'}
-                  options={[
-                    { value: 'flex-start', label: 'Start' },
-                    { value: 'center', label: 'Center' },
-                    { value: 'flex-end', label: 'End' },
-                    { value: 'space-between', label: 'Space between' },
-                    { value: 'space-around', label: 'Space around' },
-                  ]}
-                  onCommit={(v) => write({ 'justify-content': v === 'flex-start' ? null : v })}
-                />
-                <SelectField
-                  label="Align"
-                  value={s['align-items'] ?? 'stretch'}
-                  options={[
-                    { value: 'stretch', label: 'Stretch' },
-                    { value: 'flex-start', label: 'Start' },
-                    { value: 'center', label: 'Center' },
-                    { value: 'flex-end', label: 'End' },
-                    { value: 'baseline', label: 'Baseline' },
-                  ]}
-                  onCommit={(v) => write({ 'align-items': v === 'stretch' ? null : v })}
-                />
                 <Row>
-                  <NumberField
-                    label="↔"
-                    value={pairRead('column-gap', 'gap')}
-                    min={0}
-                    onCommit={(v) => {
-                      const rowGap = px(s['row-gap'] ?? s.gap)
-                      write({ 'column-gap': `${v}px`, 'row-gap': rowGap !== null ? `${rowGap}px` : `${v}px`, gap: null })
-                    }}
+                  <AlignmentGrid
+                    direction={(s['flex-direction'] ?? 'row').startsWith('column') ? 'column' : 'row'}
+                    justify={s['justify-content'] ?? ''}
+                    align={s['align-items'] ?? ''}
+                    onChange={(j, a) =>
+                      write({ 'justify-content': j === 'flex-start' ? null : j, 'align-items': a })
+                    }
                   />
-                  <NumberField
-                    label="↕"
-                    value={pairRead('row-gap', 'gap')}
-                    min={0}
-                    onCommit={(v) => {
-                      const colGap = px(s['column-gap'] ?? s.gap)
-                      write({ 'row-gap': `${v}px`, 'column-gap': colGap !== null ? `${colGap}px` : `${v}px`, gap: null })
-                    }}
-                  />
+                  <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                    <NumberField
+                      label={<UnfoldHorizontal className="size-3" aria-label="Horizontal gap" />}
+                      value={px(s['column-gap'] ?? s.gap) ?? 0}
+                      min={0}
+                      onCommit={(v) => {
+                        const rowGap = px(s['row-gap'] ?? s.gap)
+                        write({ 'column-gap': `${v}px`, 'row-gap': rowGap !== null ? `${rowGap}px` : `${v}px`, gap: null })
+                      }}
+                    />
+                    <NumberField
+                      label={<UnfoldVertical className="size-3" aria-label="Vertical gap" />}
+                      value={px(s['row-gap'] ?? s.gap) ?? 0}
+                      min={0}
+                      onCommit={(v) => {
+                        const colGap = px(s['column-gap'] ?? s.gap)
+                        write({ 'row-gap': `${v}px`, 'column-gap': colGap !== null ? `${colGap}px` : `${v}px`, gap: null })
+                      }}
+                    />
+                  </div>
                 </Row>
               </>
             ) : null}
+            <div className="text-[10px] text-[var(--cz-panel-muted)]">Padding</div>
             <Row>
               <NumberField
-                label="◫"
-                value={pairRead('padding-left', 'padding')}
+                label={<ArrowLeftRight className="size-3" aria-label="Horizontal padding" />}
+                value={px(s['padding-left'] ?? s.padding) ?? 0}
                 min={0}
                 onCommit={writePair(['padding-left', 'padding-right'], 'padding', ['padding-top', 'padding-bottom'])}
               />
               <NumberField
-                label="⊟"
-                value={pairRead('padding-top', 'padding')}
+                label={<ArrowUpDown className="size-3" aria-label="Vertical padding" />}
+                value={px(s['padding-top'] ?? s.padding) ?? 0}
                 min={0}
                 onCommit={writePair(['padding-top', 'padding-bottom'], 'padding', ['padding-left', 'padding-right'])}
               />
@@ -394,35 +485,23 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
             />
           </>
         ) : null}
-        {inFlexParent && !isAbsolute ? (
+        {flowChild ? (
           <>
+            <div className="text-[10px] text-[var(--cz-panel-muted)]">Margin</div>
             <Row>
               <NumberField
-                label="◧"
-                value={pairRead('margin-left', 'margin')}
+                label={<MoveHorizontal className="size-3" aria-label="Horizontal margin" />}
+                value={px(s['margin-left'] ?? s.margin) ?? 0}
                 min={0}
                 onCommit={writePair(['margin-left', 'margin-right'], 'margin', ['margin-top', 'margin-bottom'])}
               />
               <NumberField
-                label="⊞"
-                value={pairRead('margin-top', 'margin')}
+                label={<MoveVertical className="size-3" aria-label="Vertical margin" />}
+                value={px(s['margin-top'] ?? s.margin) ?? 0}
                 min={0}
                 onCommit={writePair(['margin-top', 'margin-bottom'], 'margin', ['margin-left', 'margin-right'])}
               />
             </Row>
-            <SelectField
-              label="Width"
-              value={s['flex-grow'] ?? s.flex ? 'fill' : 'fixed'}
-              options={[
-                { value: 'fixed', label: 'Fixed / hug' },
-                { value: 'fill', label: 'Fill container' },
-              ]}
-              onCommit={(v) =>
-                write(v === 'fill'
-                  ? { 'flex-grow': '1', 'flex-basis': '0', width: null }
-                  : { 'flex-grow': null, 'flex-basis': null })
-              }
-            />
             <SelectField
               label="Self"
               value={s['align-self'] ?? 'auto'}
