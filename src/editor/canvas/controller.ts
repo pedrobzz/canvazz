@@ -40,7 +40,7 @@ type Gesture =
   | {
       type: 'resize'
       dir: string
-      items: Array<{ id: NodeId; el: HTMLElement; rect: Rect }>
+      items: Array<{ id: NodeId; el: HTMLElement; rect: Rect; mode: 'abs' | 'flow' }>
       union: Rect
       startClientX: number
       startClientY: number
@@ -293,10 +293,20 @@ export class InteractionController {
         break
       }
       case 'resize': {
-        const ops: Op[] = g.items.map(({ id, el }) => ({
-          t: 'setStyle', id,
-          set: { left: el.style.left, top: el.style.top, width: el.style.width, height: el.style.height },
-        }))
+        const ops: Op[] = g.items.map(({ id, el, mode }) => {
+          const set: Record<string, string | null> =
+            mode === 'abs'
+              ? { left: el.style.left, top: el.style.top, width: el.style.width, height: el.style.height }
+              : // Explicit size replaces fill/hug behavior, like Figma.
+                { width: el.style.width, height: el.style.height, 'flex-grow': null, 'flex-basis': null }
+          return { t: 'setStyle', id, set }
+        })
+        for (const item of g.items) {
+          if (item.mode === 'flow') {
+            item.el.style.flexGrow = ''
+            item.el.style.flexBasis = ''
+          }
+        }
         this.store.apply('Resize', ops)
         break
       }
@@ -429,10 +439,14 @@ export class InteractionController {
         const fy = newUnion.height / Math.max(u.height, 0.01)
         for (const item of g.items) {
           const r = item.rect
-          const nx = newUnion.x + (r.x - u.x) * fx
-          const ny = newUnion.y + (r.y - u.y) * fy
-          item.el.style.left = fmtPx(nx)
-          item.el.style.top = fmtPx(ny)
+          if (item.mode === 'abs') {
+            item.el.style.left = fmtPx(newUnion.x + (r.x - u.x) * fx)
+            item.el.style.top = fmtPx(newUnion.y + (r.y - u.y) * fy)
+          } else {
+            // Hand-resizing a flow child pins it to a fixed size live.
+            item.el.style.flexGrow = '0'
+            item.el.style.flexBasis = 'auto'
+          }
           item.el.style.width = fmtPx(Math.max(1, r.width * fx))
           item.el.style.height = fmtPx(Math.max(1, r.height * fy))
         }
@@ -517,19 +531,28 @@ export class InteractionController {
 
   private startResize(e: PointerEvent, dir: string) {
     const camera = cameraStore.camera
-    const items: Array<{ id: NodeId; el: HTMLElement; rect: Rect }> = []
+    const items: Array<{ id: NodeId; el: HTMLElement; rect: Rect; mode: 'abs' | 'flow' }> = []
     for (const pathId of topMostOnly(this.store, this.store.ui.selection)) {
+      // Instance internals resize via overrides in the inspector, not handles.
+      if (pathId.includes(':')) continue
       const { sourceId } = parsePathId(pathId)
       const node = this.store.doc.nodes[sourceId]
       const el = nodeElement(this.world, pathId)
       if (!node || !el || node.locked) continue
       const left = px(node.style.left)
       const top = px(node.style.top)
-      if (left === null || top === null) continue
-      items.push({
-        id: sourceId, el,
-        rect: { x: left, y: top, width: el.offsetWidth, height: el.offsetHeight },
-      })
+      if (left !== null && top !== null) {
+        items.push({
+          id: sourceId, el, mode: 'abs',
+          rect: { x: left, y: top, width: el.offsetWidth, height: el.offsetHeight },
+        })
+      } else {
+        // Flow child: resizing sets explicit width/height (no position).
+        items.push({
+          id: sourceId, el, mode: 'flow',
+          rect: { x: 0, y: 0, width: el.offsetWidth, height: el.offsetHeight },
+        })
+      }
     }
     if (items.length === 0) return
     const union = unionRects(items.map((i) => i.rect))
