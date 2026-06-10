@@ -165,9 +165,6 @@ Measured by the Playwright perf harness (`tests/e2e/perf.spec.ts`, headless Chro
 
 ## Known limitations (deliberate v1 scope)
 
-- Single page per document in the UI (the model supports multiple pages).
-- Flex (auto-layout) children reorder via the layer tree; on-canvas drag-reorder of flex
-  children is not implemented (absolute-positioned nodes drag/reparent freely).
 - `<style>` blocks in imported HTML are dropped — styling round-trips via inline styles and
   Tailwind classes.
 - Comments render as pins with prompt-based editing — functional, not polished.

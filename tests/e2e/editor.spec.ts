@@ -102,9 +102,10 @@ test('draw a rectangle with the R tool inside the artboard', async ({ page }) =>
   await expect(page.locator('[data-tool="select"]')).toHaveAttribute('aria-pressed', 'true')
 })
 
-test('double-click descends and edits text in place', async ({ page }) => {
+test('double-click deep-selects and edits text in place', async ({ page }) => {
   const title = await centerOf(page, 'title-1')
-  await page.mouse.dblclick(title.x, title.y) // selects title (descends from card)
+  await page.mouse.dblclick(title.x, title.y) // deep-selects the exact node
+  expect(await selection(page)).toEqual(['title-1'])
   await page.mouse.dblclick(title.x, title.y) // enters text editing
   await expect(page.locator('[data-canvas-text]')).toBeVisible()
   await page.keyboard.press(`${modifier}+a`)
@@ -222,4 +223,53 @@ test('autosave persists across reload', async ({ page }) => {
   await page.goto('/') // no ?fresh — load from IndexedDB
   await expect(page.locator('[data-node-id="card-1"]')).toBeVisible()
   expect(await nodeStyle(page, 'card-1', 'left')).toBe(moved)
+})
+
+test('drawing into an auto-layout container creates a flow child', async ({ page }) => {
+  await page.keyboard.press('r')
+  const title = await page.locator('[data-node-id="title-1"]').boundingBox()
+  if (!title) throw new Error('no title box')
+  await dragBy(page, { x: title.x + 10, y: title.y + title.height + 5 }, 50, 24)
+  const sel = await selection(page)
+  expect(sel).toHaveLength(1)
+  const id = sel[0]
+  expect(await nodeField(page, id, 'parent')).toBe('card-1')
+  // Joins the flow: no absolute positioning.
+  expect(await nodeStyle(page, id, 'position')).toBeUndefined()
+  const children = await page.evaluate(() => {
+    const cz = (window as never as {
+      __canvazz: { editorStore: { doc: { nodes: Record<string, { children: string[] }> } } }
+    }).__canvazz
+    return cz.editorStore.doc.nodes['card-1'].children
+  })
+  expect(children.indexOf(id)).toBe(1) // right after the title, where drawn
+})
+
+test('flow child drags out of and back into auto-layout containers', async ({ page }) => {
+  const label = await centerOf(page, 'button-label-1')
+  await page.mouse.dblclick(label.x, label.y)
+  expect(await selection(page)).toEqual(['button-label-1'])
+
+  // Out of the button onto the artboard: becomes absolute.
+  const board = await page.locator('[data-node-id="artboard-1"]').boundingBox()
+  if (!board) throw new Error('no artboard box')
+  await dragBy(page, label, 0, board.y + board.height - 40 - label.y)
+  expect(await nodeField(page, 'button-label-1', 'parent')).toBe('artboard-1')
+  expect(await nodeStyle(page, 'button-label-1', 'position')).toBe('absolute')
+
+  // Back into the button: joins the flex flow again.
+  const cur = await centerOf(page, 'button-label-1')
+  const btn = await centerOf(page, 'button-1')
+  await dragBy(page, cur, btn.x - cur.x, btn.y - cur.y)
+  expect(await nodeField(page, 'button-label-1', 'parent')).toBe('button-1')
+  expect(await nodeStyle(page, 'button-label-1', 'position')).toBeUndefined()
+})
+
+test('pages: add, switch, and switch back', async ({ page }) => {
+  await page.locator('[data-testid="pages"] button[aria-label="Add page"]').click()
+  await expect(page.locator('[data-testid="pages"] li')).toHaveCount(2)
+  // The new page is active and empty.
+  await expect(page.locator('[data-node-id="artboard-1"]')).toHaveCount(0)
+  await page.locator('[data-testid="pages"] li').first().click()
+  await expect(page.locator('[data-node-id="artboard-1"]')).toBeVisible()
 })
