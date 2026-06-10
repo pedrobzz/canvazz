@@ -273,3 +273,28 @@ test('pages: add, switch, and switch back', async ({ page }) => {
   await page.locator('[data-testid="pages"] li').first().click()
   await expect(page.locator('[data-node-id="artboard-1"]')).toBeVisible()
 })
+
+test('layer tree shows auto-layout children in flow order and drags WYSIWYG', async ({ page }) => {
+  await page.locator('[data-layer-id="artboard-1"] button[aria-label="Expand"]').click()
+  await page.locator('[data-layer-id="card-1"] button[aria-label="Expand"]').click()
+  const order = await page.$$eval('[data-layer-id]', (els) =>
+    els.map((e) => e.getAttribute('data-layer-id')),
+  )
+  // Flex children listed in document order (= visual order)…
+  expect(order.indexOf('title-1')).toBeLessThan(order.indexOf('body-1'))
+  expect(order.indexOf('body-1')).toBeLessThan(order.indexOf('button-1'))
+  // …while absolute artboard children stay z-ordered (front first).
+  expect(order.indexOf('card-1')).toBeLessThan(order.indexOf('hero-1'))
+})
+
+test('inspector color swatch stays compact (no row overflow)', async ({ page }) => {
+  const card = await centerOf(page, 'card-1')
+  await page.mouse.click(card.x, card.y)
+  const swatch = page.locator('[data-testid="inspector"] input[type="color"]').first()
+  const box = await swatch.boundingBox()
+  expect(box?.width ?? 999).toBeLessThanOrEqual(32)
+  const overflow = await page
+    .locator('[data-testid="inspector"]')
+    .evaluate((el) => el.scrollWidth > el.clientWidth)
+  expect(overflow).toBe(false)
+})

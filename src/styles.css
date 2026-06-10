@@ -244,7 +244,7 @@ body {
   color: var(--cz-panel-fg);
   font-size: 12px;
 }
-.cz-panel input,
+.cz-panel input:not([type='color']),
 .cz-panel select,
 .cz-panel textarea {
   background: var(--cz-panel-hover);
@@ -261,6 +261,22 @@ body {
 .cz-panel textarea:focus {
   outline: none;
   border-color: var(--cz-accent);
+}
+.cz-panel input[type='color'] {
+  width: 28px;
+  height: 24px;
+  flex: none;
+  border: 1px solid var(--cz-panel-border);
+  border-radius: 4px;
+  padding: 0;
+  background: none;
+}
+.cz-panel input[type='color']::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+.cz-panel input[type='color']::-webkit-color-swatch {
+  border: none;
+  border-radius: 2px;
 }
 .cz-panel ::placeholder {
   color: var(--cz-panel-muted);

@@ -59,17 +59,20 @@ export function LayerTree() {
   }, [ui.selection, doc])
 
   const rows: FlatRow[] = []
-  const pushRows = (ids: NodeId[], depth: number) => {
-    for (let i = ids.length - 1; i >= 0; i--) {
-      const node = doc.nodes[ids[i]]
+  // Free/absolute containers list top-of-z first (reversed children); auto-
+  // layout containers list in flow order, so the tree matches the canvas.
+  const pushRows = (ids: NodeId[], depth: number, flowOrdered: boolean) => {
+    const ordered = flowOrdered ? ids : [...ids].reverse()
+    for (const id of ordered) {
+      const node = doc.nodes[id]
       if (!node) continue
       const hasChildren = node.children.length > 0 && !node.componentId
       const expanded = expandedSet.has(node.id)
       rows.push({ id: node.id, depth, node, hasChildren, expanded })
-      if (hasChildren && expanded) pushRows(node.children, depth + 1)
+      if (hasChildren && expanded) pushRows(node.children, depth + 1, isLayoutContainer(node))
     }
   }
-  pushRows(page.children, 0)
+  pushRows(page.children, 0, false)
 
   // Scroll selected row into view.
   useEffect(() => {
@@ -159,13 +162,17 @@ export function LayerTree() {
       }))
       return
     }
-    // before/after in tree = after/before in child order (tree is reversed).
+    // Tree position -> child index depends on the parent's ordering mode:
+    // flow-ordered (auto layout) lists match the array; z-ordered lists are
+    // reversed, so before/after swap.
+    const parentNode = target.parent ? doc.nodes[target.parent] : null
+    const flowOrdered = parentNode ? isLayoutContainer(parentNode) : false
     const loc = target.parent
       ? { kind: 'node' as const, parent: target.parent }
       : { kind: 'page' as const, pageId: page.id }
     const siblings = target.parent ? doc.nodes[target.parent].children : page.children
     const base = siblings.indexOf(targetId)
-    const index = pos === 'before' ? base + 1 : base
+    const index = pos === 'before' ? (flowOrdered ? base : base + 1) : (flowOrdered ? base + 1 : base)
     editorStore.apply('Reorder', dragged.map((id) => ({
       t: 'move' as const, id, to: { ...loc, index },
     })))

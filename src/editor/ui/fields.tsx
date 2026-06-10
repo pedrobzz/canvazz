@@ -158,7 +158,7 @@ export function ColorField({
       {label ? <span className="w-10 shrink-0 text-[10px] text-[var(--cz-panel-muted)]">{label}</span> : null}
       <input
         type="color"
-        className="h-6 w-7 shrink-0 cursor-pointer appearance-none rounded border-none bg-transparent p-0"
+        className="shrink-0 cursor-pointer"
         value={toPickerHex(value || '#000000')}
         onChange={(e) => onCommit(e.target.value)}
       />
