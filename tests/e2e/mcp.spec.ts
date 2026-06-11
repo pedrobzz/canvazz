@@ -137,7 +137,14 @@ test('component tools: create, instance, override, variant', async ({ page }) =>
     await callTool(page, 'create_variant', { componentId: created.componentId, name: 'dark' }),
   ) as { variantId: string; rootId: string }
   expect(variant.variantId).toBeTruthy()
-  await expect(page.locator(`[data-node-id="${variant.rootId}"]`)).toBeVisible()
+  // Variant mains live next to the original on the Design System page.
+  const variantHome = await page.evaluate((rootId) => {
+    const cz = (window as never as {
+      __canvazz: { editorStore: { doc: { pages: Array<{ id: string; children: string[] }> } } }
+    }).__canvazz
+    return cz.editorStore.doc.pages.find((p) => p.children.includes(rootId))?.id
+  }, variant.rootId)
+  expect(variantHome).toBe('page_design_system')
 
   // Switch the instance to the dark variant.
   textPayload(

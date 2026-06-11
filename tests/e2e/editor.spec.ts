@@ -351,3 +351,49 @@ test('instance inspector shows inherited definition styles', async ({ page }) =>
     .first()
   await expect(fillValue).toHaveValue('#4f8ef7')
 })
+
+test('color tokens recolor every usage instantly and export standalone', async ({ page }) => {
+  await page.evaluate(() => {
+    const cz = (window as never as { __canvazz: { editorStore: { apply(l: string, ops: unknown[]): unknown } } }).__canvazz
+    cz.editorStore.apply('Add token', [{ t: 'setToken', name: 'brand', value: '#ff0000' }])
+    cz.editorStore.apply('Use token', [
+      { t: 'setStyle', id: 'hero-1', set: { background: null, 'background-color': 'var(--brand)' } },
+    ])
+  })
+  await expect(page.locator('[data-node-id="hero-1"]')).toHaveCSS('background-color', 'rgb(255, 0, 0)')
+  // One token edit recolors every usage.
+  await page.evaluate(() => {
+    const cz = (window as never as { __canvazz: { editorStore: { apply(l: string, ops: unknown[]): unknown } } }).__canvazz
+    cz.editorStore.apply('Edit token', [{ t: 'setToken', name: 'brand', value: '#00ff00' }])
+  })
+  await expect(page.locator('[data-node-id="hero-1"]')).toHaveCSS('background-color', 'rgb(0, 255, 0)')
+  // Exports embed the token so the HTML stands alone.
+  const html = await page.evaluate(async () => {
+    const { exportHtml } = await import('/src/editor/compiler/export.ts')
+    const cz = (window as never as { __canvazz: { editorStore: { doc: unknown } } }).__canvazz
+    return exportHtml(cz.editorStore.doc as never, 'hero-1')
+  })
+  expect(html).toContain('--brand: #00ff00')
+  expect(html).toContain('var(--brand)')
+})
+
+test('create component moves main to the Design System page, leaves instance', async ({ page }) => {
+  await select(page, ['card-1'])
+  await page.locator('button[aria-label="Create component"]').click()
+  const onDs = await page.evaluate(() => {
+    const cz = (window as never as {
+      __canvazz: { editorStore: { doc: { pages: Array<{ id: string; children: string[] }> } } }
+    }).__canvazz
+    return cz.editorStore.doc.pages.find((p) => p.id === 'page_design_system')?.children.includes('card-1')
+  })
+  expect(onDs).toBe(true)
+  // The replacement instance renders in place, linked to the component.
+  const sel = await selection(page)
+  expect(await nodeField(page, sel[0], 'componentId')).toBeTruthy()
+  const repl = page.locator(`[data-node-id="${sel[0]}"]`)
+  await expect(repl).toBeVisible()
+  await expect(repl).toContainText('Design with real DOM')
+  // The Design System page is a real page: switch to it and see the main.
+  await page.getByText('Design System').click()
+  await expect(page.locator('[data-node-id="card-1"]')).toBeVisible()
+})
