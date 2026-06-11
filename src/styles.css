@@ -106,9 +106,10 @@ body {
  * Canvas content elements get a neutral baseline so the editable DOM behaves
  * like a clean document, independent of editor chrome styles.
  */
-[data-canvas-world] {
-  will-change: transform;
-}
+/* No will-change here: promoting the world to a compositor layer makes
+ * Chrome cache its raster at ~1x and bitmap-stretch it when the camera
+ * scale changes (blurry zoom). Unpromoted, it re-rasterizes at the live
+ * scale, so text stays vector-sharp at any zoom. */
 [data-canvas-world] * {
   box-sizing: border-box;
 }
