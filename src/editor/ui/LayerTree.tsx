@@ -1,6 +1,6 @@
 import {
   ChevronDown, ChevronRight, Columns3, Component, Eye, EyeOff, Frame, Group,
-  Image, List, Lock, LockOpen, MousePointerClick, Rows3, Square, Type,
+  Image, List, Lock, LockOpen, MousePointerClick, Rows3, Shapes, Square, Type,
 } from 'lucide-react'
 import { memo, useEffect, useRef, useState } from 'react'
 import {
@@ -239,6 +239,7 @@ function LayerIcon({ node }: { node: NodeModel }) {
   }
   const muted = `${cls} text-[var(--cz-panel-muted)]`
   if (node.isArtboard) return <Frame className={muted} />
+  if (node.tag === 'svg') return <Shapes className={muted} />
   if (node.tag === 'img') return <Image className={muted} />
   if (node.tag === 'button') return <MousePointerClick className={muted} />
   if (node.tag === 'ul' || node.tag === 'ol' || node.tag === 'li') return <List className={muted} />

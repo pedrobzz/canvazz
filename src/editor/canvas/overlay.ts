@@ -120,7 +120,7 @@ export function createOverlay({ viewport, world, store, onArtboardLabelPointerDo
       const { sourceId } = parsePathId(pathId)
       const node = store.doc.nodes[sourceId]
       const rotation = node?.style.rotate ? parseFloat(node.style.rotate) || 0 : 0
-      if (rotation !== 0) {
+      if (rotation !== 0 && el instanceof HTMLElement) {
         // AABB center == rotated box center (rotation about center).
         const w = el.offsetWidth * camera.scale
         const h = el.offsetHeight * camera.scale

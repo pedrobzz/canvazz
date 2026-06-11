@@ -18,9 +18,44 @@ export const ALLOWED_TAGS = new Set([
 /** Tags whose content is dropped wholesale, not unwrapped. */
 export const DROP_CONTENT_TAGS = new Set([
   'script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base',
-  'form', 'noscript', 'template', 'svg', 'math', 'video', 'audio', 'canvas',
+  'form', 'noscript', 'template', 'math', 'video', 'audio', 'canvas',
   'frame', 'frameset', 'applet',
 ])
+
+/**
+ * Sanitized SVG subset — vectors are DOM elements too. No scripting hooks,
+ * no external references: `use`, `foreignObject`, `image`, `animate*`,
+ * `filter`, `pattern` are dropped wholesale inside svg content.
+ */
+export const SVG_TAGS = new Set([
+  'svg', 'g', 'path', 'circle', 'ellipse', 'rect', 'line', 'polyline',
+  'polygon', 'defs', 'linearGradient', 'radialGradient', 'stop', 'text', 'tspan',
+])
+
+/** SVG presentation/geometry attributes (case-sensitive, DOM-adjusted names). */
+export const SVG_ATTRS = new Set([
+  'd', 'viewBox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap',
+  'stroke-linejoin', 'stroke-dasharray', 'stroke-dashoffset', 'fill-rule',
+  'clip-rule', 'fill-opacity', 'stroke-opacity', 'opacity',
+  'cx', 'cy', 'r', 'rx', 'ry', 'x', 'y', 'x1', 'y1', 'x2', 'y2',
+  'points', 'width', 'height', 'transform', 'transform-origin',
+  'offset', 'stop-color', 'stop-opacity', 'gradientUnits',
+  'gradientTransform', 'spreadMethod', 'preserveAspectRatio', 'xmlns', 'id',
+  'vector-effect', 'pathLength', 'text-anchor', 'dominant-baseline',
+  'font-size', 'font-family', 'font-weight', 'letter-spacing',
+])
+
+/**
+ * Attribute values may reference same-document ids (`url(#grad)`) but never
+ * external resources or script.
+ */
+export function isSafeAttrValue(value: string): boolean {
+  if (value.length > 4000) return false
+  if (/javascript:|data:text|<|>/i.test(value)) return false
+  const urls = value.match(/url\s*\(\s*['"]?[^'")]*/gi)
+  if (urls) return urls.every((u) => /url\s*\(\s*['"]?#/i.test(u))
+  return true
+}
 
 export const ALLOWED_ATTRS = new Set([
   'src', 'alt', 'href', 'title', 'placeholder', 'type', 'value', 'name',
@@ -98,6 +133,10 @@ export const ALLOWED_CSS_PROPS = new Set([
   'white-space', 'word-break', 'overflow-wrap', 'hyphens', 'vertical-align',
   'list-style', 'list-style-type', 'list-style-position', '-webkit-line-clamp',
   '-webkit-box-orient', '-webkit-background-clip', '-webkit-text-fill-color',
+  // SVG presentation
+  'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
+  'stroke-dasharray', 'stroke-dashoffset', 'fill-opacity', 'stroke-opacity',
+  'stop-color', 'stop-opacity', 'paint-order', 'vector-effect',
   // Effects / geometry
   'transform', 'transform-origin', 'rotate', 'scale', 'translate',
   'filter', 'backdrop-filter', 'clip-path', 'mask-image',

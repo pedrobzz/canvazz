@@ -1,9 +1,12 @@
 import {
   ALLOWED_TAGS,
   DROP_CONTENT_TAGS,
+  SVG_ATTRS,
+  SVG_TAGS,
   URL_ATTRS,
   isAllowedAttr,
   isAllowedCssProp,
+  isSafeAttrValue,
   isSafeCssValue,
   sanitizeClasses,
   sanitizeUrl,
@@ -79,6 +82,8 @@ export function sanitizeStyle(
 const ID_RE = /^[\w-]{1,64}$/
 
 const TAG_NAMES: Record<string, string> = {
+  svg: 'Vector', path: 'Path', circle: 'Circle', rect: 'Rect', line: 'Line',
+  ellipse: 'Ellipse', polygon: 'Polygon', polyline: 'Polyline', g: 'Group',
   p: 'Text', h1: 'Heading 1', h2: 'Heading 2', h3: 'Heading 3', h4: 'Heading 4',
   h5: 'Heading 5', h6: 'Heading 6', span: 'Text', img: 'Image', button: 'Button',
   a: 'Link', ul: 'List', ol: 'List', li: 'List item', input: 'Input',
@@ -123,9 +128,19 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     return id
   }
 
-  const convertElement = (el: Element, parentId: string | null): NodeModel | null => {
-    const tag = el.tagName.toLowerCase()
-    if (DROP_CONTENT_TAGS.has(tag)) {
+  const convertElement = (el: Element, parentId: string | null, inSvg: boolean): NodeModel | null => {
+    // localName keeps DOM-adjusted SVG casing (linearGradient) and is
+    // lowercase for HTML elements.
+    const tag = el.localName
+    const isSvgEl = inSvg || tag === 'svg'
+    if (isSvgEl) {
+      // Inside svg content only the sanctioned subset survives; unknown
+      // elements (use, foreignObject, filter, animate…) drop wholesale.
+      if (!SVG_TAGS.has(tag)) {
+        dropped.push(`tag:${tag}`)
+        return null
+      }
+    } else if (DROP_CONTENT_TAGS.has(tag)) {
       dropped.push(`tag:${tag}`)
       return null
     }
@@ -133,7 +148,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     const node: NodeModel = {
       id: takeId(el),
       name: '',
-      tag: ALLOWED_TAGS.has(tag) ? tag : 'div',
+      tag: isSvgEl || ALLOWED_TAGS.has(tag) ? tag : 'div',
       attrs: {},
       style: {},
       classes: [],
@@ -142,10 +157,11 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
       visible: true,
       locked: false,
     }
-    if (!ALLOWED_TAGS.has(tag)) dropped.push(`tag:${tag}->div`)
+    if (!isSvgEl && !ALLOWED_TAGS.has(tag)) dropped.push(`tag:${tag}->div`)
 
     for (const attr of Array.from(el.attributes)) {
-      const name = attr.name.toLowerCase()
+      // SVG attribute names are case-sensitive (viewBox); HTML's lowercase.
+      const name = isSvgEl ? attr.name : attr.name.toLowerCase()
       if (name === 'style') {
         node.style = sanitizeStyle(attr.value, dropped)
       } else if (name === 'class') {
@@ -156,8 +172,14 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
         node.name = attr.value.slice(0, 80)
       } else if (name === 'data-cz-id') {
         // consumed by takeId
-      } else if (name.startsWith('on') || name === 'srcdoc' || name === 'formaction') {
+      } else if (name.toLowerCase().startsWith('on') || name === 'srcdoc' || name === 'formaction') {
         dropped.push(`attr:${name}`)
+      } else if (isSvgEl) {
+        if (SVG_ATTRS.has(name) && isSafeAttrValue(attr.value)) {
+          node.attrs[name] = attr.value.slice(0, 4000)
+        } else if (!name.startsWith('data-')) {
+          dropped.push(`attr:${name}`)
+        }
       } else if (URL_ATTRS.has(name)) {
         const safe = sanitizeUrl(attr.value)
         if (safe !== null) node.attrs[name] = safe
@@ -194,7 +216,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
           childEls.push(span)
         }
       } else if (child.nodeType === 1) {
-        const converted = convertElement(child as Element, node.id)
+        const converted = convertElement(child as Element, node.id, isSvgEl)
         if (converted) childEls.push(converted)
       }
     }
@@ -210,7 +232,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
 
   const rootIds: string[] = []
   for (const el of Array.from(doc.body.children)) {
-    const node = convertElement(el, null)
+    const node = convertElement(el, null, false)
     if (node) {
       if (opts.defaultRootStyle && !node.style.position) {
         node.style = { ...opts.defaultRootStyle, ...node.style }

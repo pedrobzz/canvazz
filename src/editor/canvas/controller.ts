@@ -9,7 +9,8 @@ import {
 } from '../model/factory'
 import {
   canReceiveChildren, copyNodes, deleteNodes, duplicateNodes, groupNodes,
-  isTextNode, nudgeNodes, pasteHtml, reorderNodes, topMostOnly, ungroupNodes,
+  isSvgNode, isTextNode, nudgeNodes, pasteHtml, reorderNodes, topMostOnly,
+  ungroupNodes,
 } from '../commands'
 import { parsePathId } from '../model/instances'
 import type { Overlay } from './overlay'
@@ -541,17 +542,15 @@ export class InteractionController {
       if (!node || !el || node.locked) continue
       const left = px(node.style.left)
       const top = px(node.style.top)
+      // SVGElement has no offsetWidth; derive size from the live rect.
+      const world = worldRectOf(el, this.viewport, camera)
+      const w = el instanceof HTMLElement ? el.offsetWidth : world.width
+      const h = el instanceof HTMLElement ? el.offsetHeight : world.height
       if (left !== null && top !== null) {
-        items.push({
-          id: sourceId, el, mode: 'abs',
-          rect: { x: left, y: top, width: el.offsetWidth, height: el.offsetHeight },
-        })
+        items.push({ id: sourceId, el, mode: 'abs', rect: { x: left, y: top, width: w, height: h } })
       } else {
         // Flow child: resizing sets explicit width/height (no position).
-        items.push({
-          id: sourceId, el, mode: 'flow',
-          rect: { x: 0, y: 0, width: el.offsetWidth, height: el.offsetHeight },
-        })
+        items.push({ id: sourceId, el, mode: 'flow', rect: { x: 0, y: 0, width: w, height: h } })
       }
     }
     if (items.length === 0) return
@@ -757,7 +756,7 @@ export class InteractionController {
       case 'Enter':
         if (sel.length === 1) {
           const node = store.doc.nodes[sel[0]]
-          if (node && (node.text !== undefined || node.children.length === 0)) {
+          if (node && !isSvgNode(node) && (node.text !== undefined || node.children.length === 0)) {
             store.setUi({ editingTextId: sel[0] })
             e.preventDefault()
           }
@@ -864,7 +863,7 @@ export class InteractionController {
     if (this.store.ui.selection.includes(pathId)) {
       const { sourceId, instanceId } = parsePathId(pathId)
       const node = this.store.doc.nodes[sourceId]
-      if (!instanceId && node && node.children.length === 0 && !node.isArtboard) {
+      if (!instanceId && node && node.children.length === 0 && !node.isArtboard && !isSvgNode(node)) {
         this.store.setUi({ editingTextId: pathId })
       }
       return
@@ -932,7 +931,13 @@ export class InteractionController {
       cur = node.parent
     }
     if (instanceId && pathId !== instanceId) chain.push(pathId)
-    return chain.length > 0 ? chain : [pathId]
+    const result = chain.length > 0 ? chain : [pathId]
+    // Vectors select as a unit: a single click stops at the svg root
+    // (double-click still deep-selects paths inside).
+    const svgIdx = result.findIndex(
+      (id) => this.store.doc.nodes[parsePathId(id).sourceId]?.tag === 'svg',
+    )
+    return svgIdx >= 0 ? result.slice(0, svgIdx + 1) : result
   }
 
   private pickSelection(e: PointerEvent): string | null {

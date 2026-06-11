@@ -154,3 +154,46 @@ describe('round trip', () => {
     })
   })
 })
+
+describe('svg subset', () => {
+  it('keeps the sanitized SVG subset with case-preserved tags and attrs', () => {
+    const input = `<svg data-cz-id="v1" data-cz-name="Ring" viewBox="0 0 92 92" width="92" height="92"><defs data-cz-id="v2"><linearGradient data-cz-id="v3" id="g1" gradientUnits="userSpaceOnUse"><stop data-cz-id="v4" offset="0" stop-color="#0A9BFF"></stop></linearGradient></defs><circle data-cz-id="v5" cx="46" cy="46" r="41.5" fill="none" stroke="url(#g1)" stroke-width="9" stroke-linecap="round" stroke-dasharray="65 196"></circle></svg>`
+    const { doc, rootIds, dropped } = intoDoc(input)
+    const svg = doc.nodes[rootIds[0]]
+    expect(svg.tag).toBe('svg')
+    expect(svg.attrs.viewBox).toBe('0 0 92 92')
+    expect(doc.nodes.v3.tag).toBe('linearGradient')
+    expect(doc.nodes.v5.attrs['stroke-dasharray']).toBe('65 196')
+    expect(doc.nodes.v5.attrs.stroke).toBe('url(#g1)')
+    expect(dropped).toHaveLength(0)
+
+    // Round trip: export -> re-import is identical.
+    const html = exportHtml(doc, 'v1')
+    expect(html).toContain('viewBox="0 0 92 92"')
+    const second = intoDoc(html)
+    expect(second.doc.nodes.v5.attrs['stroke-width']).toBe('9')
+    expect(second.doc.nodes.v3.tag).toBe('linearGradient')
+    expect(second.dropped).toHaveLength(0)
+  })
+
+  it('drops scripting hooks and external references inside svg', () => {
+    const input = `<svg data-cz-id="s1" viewBox="0 0 10 10">
+      <use href="https://evil.example/x.svg#a"></use>
+      <foreignObject><div onclick="alert(1)">x</div></foreignObject>
+      <image href="https://evil.example/x.png"></image>
+      <path data-cz-id="s2" d="M0 0L10 10" fill="url(https://evil.example)" stroke="#fff" onclick="alert(1)"></path>
+    </svg>`
+    const { doc, dropped } = intoDoc(input)
+    const tags = Object.values(doc.nodes).map((n) => n.tag)
+    expect(tags).toContain('svg')
+    expect(tags).toContain('path')
+    expect(tags).not.toContain('use')
+    expect(tags).not.toContain('foreignObject')
+    expect(tags).not.toContain('image')
+    // External url() in fill rejected; same-doc stroke kept; handler dropped.
+    expect(doc.nodes.s2.attrs.fill).toBeUndefined()
+    expect(doc.nodes.s2.attrs.stroke).toBe('#fff')
+    expect(doc.nodes.s2.attrs.onclick).toBeUndefined()
+    expect(dropped).toEqual(expect.arrayContaining(['tag:use', 'tag:foreignObject', 'attr:fill', 'attr:onclick']))
+  })
+})

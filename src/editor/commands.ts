@@ -3,6 +3,7 @@ import { cloneSubtree } from './model/factory'
 import { genId } from './model/ids'
 import { exportHtml } from './compiler/export'
 import { parseHtml } from './compiler/parse'
+import { SVG_TAGS } from './compiler/allowlist'
 import { px, fmtPx } from './canvas/geometry'
 import type { Rect } from './canvas/geometry'
 import type { EditorStore } from './store/editorStore'
@@ -310,6 +311,11 @@ export function isTextNode(node: NodeModel): boolean {
   return TEXT_LEAF_TAGS.has(node.tag) && node.children.length === 0
 }
 
+/** Any element of the sanitized SVG subset. */
+export function isSvgNode(node: NodeModel): boolean {
+  return SVG_TAGS.has(node.tag)
+}
+
 /**
  * Whether a node can receive dropped/drawn children. Artboards always can;
  * otherwise any non-void element that isn't a text leaf and either already
@@ -317,6 +323,7 @@ export function isTextNode(node: NodeModel): boolean {
  */
 export function canReceiveChildren(node: NodeModel): boolean {
   if (node.componentId || node.text !== undefined || NEVER_CONTAINERS.has(node.tag)) return false
+  if (SVG_TAGS.has(node.tag)) return false // vectors edit as a unit
   if (node.isArtboard || node.children.length > 0) return true
   return isLayoutContainer(node)
 }
