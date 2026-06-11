@@ -1,5 +1,6 @@
 import { useState, useSyncExternalStore } from 'react'
 import { Check, Component, File, Layers, Plus, ScrollText, Sparkles, User } from 'lucide-react'
+import { toPickerHex } from './fields'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cameraStore } from '../canvas/camera'
 import { createInstance } from '../components/componentCommands'
@@ -34,6 +35,7 @@ export function LeftPanel() {
           <LayerTree />
         </TabsContent>
         <TabsContent value="components" className="min-h-0 flex-1 overflow-y-auto">
+          <ColorsSection />
           <ComponentList />
         </TabsContent>
         <TabsContent value="log" className="min-h-0 flex-1 overflow-y-auto">
@@ -112,6 +114,98 @@ function PagesSection() {
           )
         })}
       </ul>
+    </div>
+  )
+}
+
+/**
+ * Color tokens. Each token is a CSS custom property on the canvas root, so
+ * every node referencing var(--name) recolors instantly when a token changes.
+ */
+function ColorsSection() {
+  useDocVersion()
+  const tokens = editorStore.doc.tokens
+  const [renaming, setRenaming] = useState<string | null>(null)
+
+  return (
+    <div className="border-b border-[var(--cz-panel-border)] pb-2" data-testid="colors">
+      <div className="flex items-center justify-between px-3 py-1.5">
+        <span className="text-[11px] font-semibold text-[var(--cz-panel-fg)]">Colors</span>
+        <button
+          aria-label="Add color"
+          className="rounded p-0.5 text-[var(--cz-panel-muted)] hover:bg-[var(--cz-panel-hover)] hover:text-white"
+          onClick={() => {
+            let n = Object.keys(tokens).length + 1
+            while (tokens[`color-${n}`]) n++
+            editorStore.apply('Add color token', [
+              { t: 'setToken', name: `color-${n}`, value: '#4f8ef7' },
+            ])
+          }}
+        >
+          <Plus className="size-3.5" />
+        </button>
+      </div>
+      {Object.keys(tokens).length === 0 ? (
+        <div className="px-3 text-[10px] text-[var(--cz-panel-muted)]">
+          Define colors once, reuse everywhere via the ◇ picker in color fields.
+        </div>
+      ) : (
+        <ul className="flex flex-col gap-0.5 px-2">
+          {Object.entries(tokens).map(([name, value]) => (
+            <li key={name} className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-[var(--cz-panel-hover)]">
+              <input
+                type="color"
+                aria-label={`${name} color`}
+                className="shrink-0 cursor-pointer"
+                value={toPickerHex(value)}
+                onChange={(e) =>
+                  editorStore.apply('Edit color token', [{ t: 'setToken', name, value: e.target.value }])
+                }
+              />
+              {renaming === name ? (
+                <input
+                  autoFocus
+                  defaultValue={name}
+                  className="h-5 flex-1"
+                  onBlur={(e) => {
+                    const next = e.target.value.trim().replace(/[^\w-]/g, '-')
+                    if (next && next !== name && !tokens[next]) {
+                      editorStore.apply('Rename color token', [
+                        { t: 'setToken', name, value: null },
+                        { t: 'setToken', name: next, value },
+                      ])
+                    }
+                    setRenaming(null)
+                  }}
+                  onKeyDown={(e) => {
+                    e.stopPropagation()
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                    if (e.key === 'Escape') setRenaming(null)
+                  }}
+                />
+              ) : (
+                <span
+                  className="flex-1 truncate font-mono text-[11px]"
+                  onDoubleClick={() => setRenaming(name)}
+                  title="Double-click to rename"
+                >
+                  {name}
+                </span>
+              )}
+              <span className="shrink-0 font-mono text-[9px] text-[var(--cz-panel-muted)]">{value}</span>
+              <button
+                aria-label={`Delete ${name}`}
+                className="shrink-0 text-[10px] text-[var(--cz-panel-muted)] opacity-0 hover:text-white group-hover:opacity-100"
+                onClick={() =>
+                  editorStore.apply('Delete color token', [{ t: 'setToken', name, value: null }])
+                }
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

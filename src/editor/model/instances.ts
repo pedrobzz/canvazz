@@ -37,6 +37,18 @@ export function parsePathId(pathId: string): { instanceId: NodeId | null; source
   return { instanceId: pathId.slice(0, idx), sourceId: pathId.slice(idx + 1) }
 }
 
+const PLACEMENT_PROPS = ['position', 'left', 'top', 'right', 'bottom', 'translate'] as const
+
+/**
+ * Main components live absolutely positioned on the Design System page;
+ * instances must never inherit that placement — they own their own.
+ */
+export function stripPlacement(style: Record<string, string>): Record<string, string> {
+  const out = { ...style }
+  for (const prop of PLACEMENT_PROPS) delete out[prop]
+  return out
+}
+
 export function effectiveComponentRoot(doc: DocumentModel, node: NodeModel): NodeId | null {
   if (!node.componentId) return null
   const defId = node.variantId ?? node.componentId
@@ -128,7 +140,7 @@ function resolveInstance(
     if (isRoot) {
       // The instance node controls placement: its own style/classes win over
       // the def root's, so instances can be moved/resized independently.
-      merged.style = { ...merged.style, ...instance.style }
+      merged.style = { ...stripPlacement(merged.style), ...instance.style }
       merged.classes = instance.classes.length > 0 ? instance.classes : merged.classes
       merged.visible = instance.visible
       if (instance.text !== undefined) merged.text = instance.text

@@ -74,10 +74,18 @@ export function resolvedToHtml(node: ResolvedNode, opts: ExportOptions = {}, dep
   return `${open}\n${children}\n${pad}</${node.tag}>`
 }
 
+/** Design tokens ride on the export root so var() references resolve standalone. */
+function embedTokens(doc: DocumentModel, root: ResolvedNode): ResolvedNode {
+  const entries = Object.entries(doc.tokens)
+  if (entries.length === 0) return root
+  const vars = Object.fromEntries(entries.map(([k, v]) => [k.startsWith('--') ? k : `--${k}`, v]))
+  return { ...root, style: { ...vars, ...root.style } }
+}
+
 export function exportHtml(doc: DocumentModel, rootId: NodeId, opts: ExportOptions = {}): string {
   const resolved = resolveNode(doc, rootId)
   if (!resolved) throw new Error(`Unknown node: ${rootId}`)
-  return resolvedToHtml(resolved, opts)
+  return resolvedToHtml(embedTokens(doc, resolved), opts)
 }
 
 // --- JSX -------------------------------------------------------------------
@@ -124,8 +132,9 @@ export function resolvedToJsx(node: ResolvedNode, opts: ExportOptions = {}, dept
 }
 
 export function exportJsx(doc: DocumentModel, rootId: NodeId, opts: ExportOptions = {}): string {
-  const resolved = resolveNode(doc, rootId)
-  if (!resolved) throw new Error(`Unknown node: ${rootId}`)
+  const base = resolveNode(doc, rootId)
+  if (!base) throw new Error(`Unknown node: ${rootId}`)
+  const resolved = embedTokens(doc, base)
   const name = resolved.name.replace(/[^\w]/g, '') || 'Component'
   const compName = name.charAt(0).toUpperCase() + name.slice(1)
   return `export function ${compName}() {\n  return (\n${resolvedToJsx(resolved, opts, 2)}\n  )\n}\n`

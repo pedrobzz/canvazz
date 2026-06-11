@@ -1,6 +1,6 @@
 import { createElement, memo, useEffect, useRef, useSyncExternalStore } from 'react'
 import { styleToReact } from '../compiler/export'
-import { applyOverride, effectiveComponentRoot } from '../model/instances'
+import { applyOverride, effectiveComponentRoot, stripPlacement } from '../model/instances'
 import { setTextContent } from '../commands'
 import { editorStore } from '../store/editorStore'
 import { useNode } from '../store/hooks'
@@ -199,7 +199,7 @@ const DefNodeView = memo(function DefNodeView({
   let visible = merged.visible
   let text = merged.text
   if (isRoot) {
-    style = { ...style, ...instance.style }
+    style = { ...stripPlacement(style), ...instance.style }
     classes = instance.classes.length > 0 ? instance.classes : classes
     visible = instance.visible
     if (instance.text !== undefined) text = instance.text

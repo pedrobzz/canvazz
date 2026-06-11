@@ -11,7 +11,7 @@ import { exportHtml, exportJsx } from '../compiler/export'
 import { isAllowedCssProp, isSafeCssValue, sanitizeClasses, sanitizeUrl } from '../compiler/allowlist'
 import { controllerRef } from '../canvas/CanvasRoot'
 import { px, fmtPx } from '../canvas/geometry'
-import { effectiveComponentRoot, parsePathId } from '../model/instances'
+import { effectiveComponentRoot, parsePathId, stripPlacement } from '../model/instances'
 import {
   createMainComponent, detachInstance, setInstanceOverride, setInstanceVariant, variantsOf,
 } from '../components/componentCommands'
@@ -74,7 +74,7 @@ function effectiveNode(pathId: string): NodeModel | null {
         return {
           ...base,
           tag: defRoot.tag,
-          style: { ...defRoot.style, ...base.style },
+          style: { ...stripPlacement(defRoot.style), ...base.style },
           classes: base.classes.length > 0 ? base.classes : defRoot.classes,
           text: base.text ?? defRoot.text,
           attrs: { ...defRoot.attrs, ...base.attrs },

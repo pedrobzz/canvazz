@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { editorStore } from '../store/editorStore'
 
 /**
  * Compact inspector fields. They hold local draft state while focused and
@@ -120,9 +121,17 @@ export function NumberField({
 }
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i
+const TOKEN_RE = /^var\(\s*--([\w-]+)\s*\)$/
+
+/** Resolve `var(--token)` color values to the token's current color. */
+export function resolveColorValue(value: string): string {
+  const m = TOKEN_RE.exec(value.trim())
+  if (m) return editorStore.doc.tokens[m[1]] ?? '#000000'
+  return value
+}
 
 /** Best-effort conversion of a CSS color to a hex the native picker accepts. */
-function toPickerHex(value: string): string {
+export function toPickerHex(value: string): string {
   if (HEX_RE.test(value)) return value.length === 4
     ? `#${value[1]}${value[1]}${value[2]}${value[2]}${value[3]}${value[3]}`
     : value.slice(0, 7)
@@ -159,10 +168,11 @@ export function ColorField({
       <input
         type="color"
         className="shrink-0 cursor-pointer"
-        value={toPickerHex(value || '#000000')}
+        value={toPickerHex(resolveColorValue(value) || '#000000')}
         onChange={(e) => onCommit(e.target.value)}
       />
       <TextField value={value} onCommit={(v) => onCommit(v || null)} placeholder="none" mono />
+      <TokenSelect onPick={(name) => onCommit(`var(--${name})`)} />
       {allowEmpty && value ? (
         <button
           className="shrink-0 text-[10px] text-[var(--cz-panel-muted)] hover:text-[var(--cz-panel-fg)]"
@@ -173,6 +183,31 @@ export function ColorField({
         </button>
       ) : null}
     </div>
+  )
+}
+
+/** Compact dropdown applying a color token as var(--name). */
+function TokenSelect({ onPick }: { onPick: (name: string) => void }) {
+  const names = Object.keys(editorStore.doc.tokens)
+  if (names.length === 0) return null
+  return (
+    <select
+      aria-label="Use color token"
+      title="Use color token"
+      className="shrink-0 cursor-pointer"
+      style={{ width: 24 }}
+      value=""
+      onChange={(e) => {
+        if (e.target.value) onPick(e.target.value)
+      }}
+    >
+      <option value="">◇</option>
+      {names.map((name) => (
+        <option key={name} value={name}>
+          {name}
+        </option>
+      ))}
+    </select>
   )
 }
 

@@ -24,18 +24,76 @@ interface Ctx {
 
 const src = (ctx: Ctx) => ctx.source ?? 'user'
 
+/** All main components live on this dedicated, freely editable page. */
+export const DESIGN_SYSTEM_PAGE_ID = 'page_design_system'
+
+/**
+ * Create a main component: the subtree MOVES to the Design System page
+ * (created on demand) and a linked instance takes its place, so the original
+ * layout is visually unchanged while every main lives in one place.
+ */
 export function createMainComponent(ctx: Ctx, selection: string[]): string | null {
   const { store } = ctx
   if (selection.length !== 1) return null
   const id = parsePathId(selection[0]).sourceId
   const node = store.doc.nodes[id]
   if (!node || node.componentId || node.isComponentRoot || node.isArtboard) return null
+  const loc = locate(store, id)
+  if (!loc) return null
 
   const componentId = genId('cmp')
-  store.apply('Create component', [
+  const wasFlow = node.style.position !== 'absolute'
+  const ops: Op[] = []
+
+  const dsPage = store.doc.pages.find((p) => p.id === DESIGN_SYSTEM_PAGE_ID)
+  const dsChildren = dsPage?.children ?? []
+  if (!dsPage) {
+    ops.push({
+      t: 'addPage',
+      page: { id: DESIGN_SYSTEM_PAGE_ID, name: 'Design System', children: [] },
+      index: store.doc.pages.length,
+    })
+  }
+  // Stack mains vertically with breathing room.
+  let nextY = 60
+  for (const childId of dsChildren) {
+    const child = store.doc.nodes[childId]
+    const top = px(child?.style.top ?? '') ?? 0
+    const height = px(child?.style.height ?? '') ?? 120
+    nextY = Math.max(nextY, top + height + 60)
+  }
+
+  // The replacement instance mirrors the original's layout participation.
+  const instance: NodeModel = {
+    id: genId('inst'),
+    name: node.name,
+    tag: node.tag,
+    attrs: {},
+    style: wasFlow
+      ? {}
+      : {
+          position: 'absolute',
+          left: node.style.left ?? '0px',
+          top: node.style.top ?? '0px',
+        },
+    classes: [],
+    children: [],
+    parent: null,
+    visible: true,
+    locked: false,
+    componentId,
+  }
+
+  ops.push(
     { t: 'setProps', id, patch: { isComponentRoot: true } },
     { t: 'defineComponent', def: { id: componentId, name: node.name, rootId: id } },
-  ], src(ctx))
+    { t: 'move', id, to: { kind: 'page', pageId: DESIGN_SYSTEM_PAGE_ID, index: dsChildren.length } },
+    { t: 'setStyle', id, set: { position: 'absolute', left: '60px', top: fmtPx(nextY) } },
+    { t: 'insertTree', nodes: [instance], rootId: instance.id, at: loc },
+  )
+  store.apply('Create component', ops, src(ctx))
+  store.setSelection([instance.id])
+  store.recordSelectionAfter()
   return componentId
 }
 
