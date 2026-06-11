@@ -235,6 +235,14 @@ function applyOp(draft: Draft, op: Op): Op {
       draft.doc.tokens = next
       return { t: 'setToken', name: op.name, value: prev }
     }
+    case 'setFont': {
+      const prev = draft.doc.fonts[op.family] ?? null
+      const next = { ...draft.doc.fonts }
+      if (op.font === null) delete next[op.family]
+      else next[op.family] = op.font
+      draft.doc.fonts = next
+      return { t: 'setFont', family: op.family, font: prev }
+    }
     case 'addPage': {
       const pages = draft.pages()
       pages.splice(Math.max(0, Math.min(op.index, pages.length)), 0, op.page)
@@ -296,6 +304,7 @@ export function emptyDocument(id: string, name: string): DocumentModel {
     components: {},
     componentSets: {},
     tokens: {},
+    fonts: {},
     assets: {},
     comments: [],
   }

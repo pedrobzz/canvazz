@@ -160,7 +160,15 @@ export class EditorStore {
 
   /** Replace the whole document (load from disk, import). Clears history. */
   replaceDocument(doc: DocumentModel) {
-    this.doc = doc
+    // Normalize documents saved before newer model fields existed.
+    this.doc = {
+      ...doc,
+      tokens: doc.tokens ?? {},
+      fonts: doc.fonts ?? {},
+      assets: doc.assets ?? {},
+      componentSets: doc.componentSets ?? {},
+      comments: doc.comments ?? [],
+    }
     this.undoStack = []
     this.redoStack = []
     this.setUi({ selection: [], hoverId: null, editingTextId: null, aiChanged: [] })

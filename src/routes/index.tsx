@@ -4,6 +4,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { CanvasRoot } from '#/editor/canvas/CanvasRoot'
 import { cameraStore } from '#/editor/canvas/camera'
 import { startBridge } from '#/editor/ai/bridgeClient'
+import { startFontSync } from '#/editor/fonts'
 import { editorStore } from '#/editor/store/editorStore'
 import { loadDocument, seedDocument, startAutosave } from '#/editor/store/persistence'
 import { Inspector } from '#/editor/ui/Inspector'
@@ -41,9 +42,11 @@ function EditorPage() {
     if (!ready) return
     const stopAutosave = startAutosave(editorStore)
     const stopBridge = startBridge()
+    const stopFonts = startFontSync(editorStore)
     return () => {
       stopAutosave()
       stopBridge()
+      stopFonts()
     }
   }, [ready])
 

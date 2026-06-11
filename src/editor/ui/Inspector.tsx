@@ -817,10 +817,13 @@ const FONT_STACKS = [
 ]
 
 function FontFamilyField({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const docFonts = Object.keys(editorStore.doc.fonts ?? {}).map((f) => `'${f}', sans-serif`)
+  const known = [...docFonts, ...FONT_STACKS]
   const options = [
     { value: '', label: 'Default' },
+    ...docFonts.map((f, i) => ({ value: f, label: Object.keys(editorStore.doc.fonts)[i] })),
     ...FONT_STACKS.map((f) => ({ value: f, label: f })),
-    ...(value && !FONT_STACKS.includes(value) ? [{ value, label: value }] : []),
+    ...(value && !known.includes(value) ? [{ value, label: value }] : []),
   ]
   return <SelectField value={value} options={options} onCommit={onCommit} />
 }

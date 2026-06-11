@@ -4,6 +4,7 @@ import { toPickerHex } from './fields'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cameraStore } from '../canvas/camera'
 import { createInstance } from '../components/componentCommands'
+import { DEFAULT_WEIGHTS, isValidFamily, verifyFontLoaded } from '../fonts'
 import { genId } from '../model/ids'
 import { editorStore } from '../store/editorStore'
 import { useDocVersion } from '../store/hooks'
@@ -36,6 +37,7 @@ export function LeftPanel() {
         </TabsContent>
         <TabsContent value="components" className="min-h-0 flex-1 overflow-y-auto">
           <ColorsSection />
+          <FontsSection />
           <ComponentList />
         </TabsContent>
         <TabsContent value="log" className="min-h-0 flex-1 overflow-y-auto">
@@ -198,6 +200,93 @@ function ColorsSection() {
                 className="shrink-0 text-[10px] text-[var(--cz-panel-muted)] opacity-0 hover:text-white group-hover:opacity-100"
                 onClick={() =>
                   editorStore.apply('Delete color token', [{ t: 'setToken', name, value: null }])
+                }
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Document fonts: Google families load as stylesheets and become available
+ * in the typography inspector and exports.
+ */
+function FontsSection() {
+  useDocVersion()
+  const fonts = editorStore.doc.fonts ?? {}
+  const [draft, setDraft] = useState('')
+  const [status, setStatus] = useState<Record<string, 'loading' | 'ok' | 'missing'>>({})
+
+  const addFont = async () => {
+    const family = draft.trim()
+    if (!family || !isValidFamily(family) || fonts[family]) return
+    setDraft('')
+    editorStore.apply('Add font', [
+      { t: 'setFont', family, font: { family, weights: DEFAULT_WEIGHTS, source: 'google' } },
+    ])
+    setStatus((s) => ({ ...s, [family]: 'loading' }))
+    const ok = await verifyFontLoaded(family)
+    setStatus((s) => ({ ...s, [family]: ok ? 'ok' : 'missing' }))
+  }
+
+  return (
+    <div className="border-b border-[var(--cz-panel-border)] pb-2" data-testid="fonts">
+      <div className="px-3 py-1.5 text-[11px] font-semibold text-[var(--cz-panel-fg)]">Fonts</div>
+      <div className="flex items-center gap-1.5 px-3 pb-1.5">
+        <input
+          value={draft}
+          placeholder="Add Google font…"
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Enter') void addFont()
+          }}
+        />
+        <button
+          aria-label="Add font"
+          className="rounded p-0.5 text-[var(--cz-panel-muted)] hover:bg-[var(--cz-panel-hover)] hover:text-white"
+          onClick={() => void addFont()}
+        >
+          <Plus className="size-3.5" />
+        </button>
+      </div>
+      {Object.keys(fonts).length === 0 ? (
+        <div className="px-3 text-[10px] text-[var(--cz-panel-muted)]">
+          e.g. Inter, Space Grotesk, Fraunces — loaded fonts appear in Typography.
+        </div>
+      ) : (
+        <ul className="flex flex-col gap-0.5 px-2">
+          {Object.values(fonts).map((font) => (
+            <li
+              key={font.family}
+              className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-[var(--cz-panel-hover)]"
+            >
+              <span
+                className="flex-1 truncate text-[13px]"
+                style={{ fontFamily: `'${font.family}', system-ui, sans-serif` }}
+                title={`${font.family} · ${font.weights.join(', ')}`}
+              >
+                {font.family}
+              </span>
+              {status[font.family] === 'missing' ? (
+                <span className="shrink-0 text-[9px] text-[#FF453A]" title="Not found on Google Fonts">
+                  not found
+                </span>
+              ) : (
+                <span className="shrink-0 font-mono text-[9px] text-[var(--cz-panel-muted)]">
+                  {font.weights.length}w
+                </span>
+              )}
+              <button
+                aria-label={`Delete ${font.family}`}
+                className="shrink-0 text-[10px] text-[var(--cz-panel-muted)] opacity-0 hover:text-white group-hover:opacity-100"
+                onClick={() =>
+                  editorStore.apply('Remove font', [{ t: 'setFont', family: font.family, font: null }])
                 }
               >
                 ✕

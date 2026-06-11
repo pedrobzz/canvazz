@@ -75,6 +75,14 @@ export interface ComponentSetModel {
   defaultVariantId: string
 }
 
+/** A loadable font family (Google Fonts or locally installed). */
+export interface FontModel {
+  family: string
+  /** Numeric weights to load, e.g. [400, 700]. */
+  weights: number[]
+  source: 'google' | 'system'
+}
+
 export interface AssetModel {
   id: string
   name: string
@@ -107,6 +115,8 @@ export interface DocumentModel {
   componentSets: Record<string, ComponentSetModel>
   /** Design tokens exposed as CSS custom properties on the canvas root. */
   tokens: Record<string, string>
+  /** Fonts available to the document, keyed by family name. */
+  fonts: Record<string, FontModel>
   assets: Record<string, AssetModel>
   comments: CommentModel[]
 }
@@ -133,6 +143,7 @@ export type Op =
   | { t: 'removeComponent'; id: string }
   | { t: 'defineComponentSet'; set: ComponentSetModel }
   | { t: 'setToken'; name: string; value: string | null }
+  | { t: 'setFont'; family: string; font: FontModel | null }
   | { t: 'addPage'; page: PageModel; index: number }
   | { t: 'removePage'; id: string }
   | { t: 'setPageName'; id: string; name: string }
