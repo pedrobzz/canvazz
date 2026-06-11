@@ -201,3 +201,70 @@ test('finish clears AI indicators and reports the log', async ({ page }) => {
   // Pooled overlay elements stay in the DOM; they must just be hidden.
   await expect(page.locator('.cz-ai-outline:visible')).toHaveCount(0)
 })
+
+test('svg subset writes, renders, and round-trips', async ({ page }) => {
+  const result = textPayload(
+    await callTool(page, 'write_html', {
+      targetId: 'artboard-1',
+      html: `<svg data-cz-id="ring-1" data-cz-name="Ring" viewBox="0 0 92 92" width="92" height="92" style="position:absolute;left:20px;top:540px"><circle cx="46" cy="46" r="41.5" fill="none" stroke="#222226" stroke-width="9"></circle><circle cx="46" cy="46" r="41.5" fill="none" stroke="#0A9BFF" stroke-width="9" stroke-linecap="round" stroke-dasharray="65 196"></circle><use href="https://evil.example#x"></use></svg>`,
+    }),
+  ) as { ok: boolean; dropped: string[] }
+  expect(result.ok).toBe(true)
+  expect(result.dropped).toContain('tag:use')
+
+  // Renders as a real SVG element with both circles.
+  const isSvg = await page.evaluate(() => {
+    const el = document.querySelector('[data-node-id="ring-1"]')
+    return el instanceof SVGSVGElement && el.querySelectorAll('circle').length === 2
+  })
+  expect(isSvg).toBe(true)
+
+  // Exports with case-preserved attributes.
+  const html = (textPayload(await callTool(page, 'get_html', { id: 'ring-1' })) as { html: string }).html
+  expect(html).toContain('viewBox="0 0 92 92"')
+  expect(html).toContain('stroke-linecap="round"')
+  expect(html).not.toContain('use')
+})
+
+test('pages: create_page and open_page via MCP', async ({ page }) => {
+  const created = textPayload(await callTool(page, 'create_page', { name: 'protocols' })) as {
+    pageId: string
+  }
+  expect(created.pageId).toBeTruthy()
+  // New page is active and empty; artboard-1 not rendered.
+  await expect(page.locator('[data-node-id="artboard-1"]')).toHaveCount(0)
+  textPayload(await callTool(page, 'open_page', { page: 'Page 1' }))
+  await expect(page.locator('[data-node-id="artboard-1"]')).toBeVisible()
+  const info = textPayload(await callTool(page, 'get_basic_info', {})) as {
+    pages: Array<{ name: string }>
+  }
+  expect(info.pages.map((p) => p.name)).toContain('protocols')
+})
+
+test('set_tokens defines tokens that recolor usages', async ({ page }) => {
+  textPayload(await callTool(page, 'set_tokens', { set: { brand: '#ff0000' } }))
+  textPayload(
+    await callTool(page, 'update_styles', {
+      updates: [{ id: 'hero-1', set: { background: null, 'background-color': 'var(--brand)' } }],
+    }),
+  )
+  await expect(page.locator('[data-node-id="hero-1"]')).toHaveCSS('background-color', 'rgb(255, 0, 0)')
+  textPayload(await callTool(page, 'set_tokens', { set: { brand: '#00ff00' } }))
+  await expect(page.locator('[data-node-id="hero-1"]')).toHaveCSS('background-color', 'rgb(0, 255, 0)')
+})
+
+test('add_font loads a Google family usable in styles', async ({ page }) => {
+  const result = textPayload(
+    await callTool(page, 'add_font', { family: 'Space Grotesk', weights: [400, 700] }),
+  ) as { ok: boolean; loaded: boolean }
+  expect(result.ok).toBe(true)
+  expect(result.loaded).toBe(true)
+  const linked = await page.evaluate(
+    () => document.querySelector('link[data-cz-font="Space Grotesk"]') !== null,
+  )
+  expect(linked).toBe(true)
+  const fonts = textPayload(await callTool(page, 'get_fonts', {})) as {
+    documentFonts: Record<string, unknown>
+  }
+  expect(Object.keys(fonts.documentFonts)).toContain('Space Grotesk')
+})

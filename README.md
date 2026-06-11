@@ -101,6 +101,12 @@ Tailwind classes are first-class: stored on nodes, validated, exported as `class
 and compiled at runtime by `@tailwindcss/browser` so AI-written utilities (including arbitrary
 values like `top-[560px]`) paint immediately.
 
+A **sanitized SVG subset** is first-class too — vectors are DOM elements. `svg`, `path`,
+`circle`, `rect`, `line`, `poly*`, gradients, and `text` round-trip with case-preserved
+attributes (`viewBox`, `linearGradient`); `use`, `foreignObject`, external references, and
+scripting hooks are stripped. Vectors select/move/resize as a unit; double-click deep-selects
+paths inside.
+
 ### Components
 
 A main component is a flagged subtree living on canvas. Instances store only
@@ -119,16 +125,20 @@ CSS custom properties on the canvas root: define once in the Assets ▸ Colors p
 apply anywhere via the ◇ picker (`var(--name)`), and one edit recolors every usage.
 Exports embed the tokens so the generated HTML/JSX stands alone.
 
+**Fonts** are document assets: add a Google family in Assets ▸ Fonts (or via MCP `add_font`)
+and it loads as a stylesheet, shows in the typography inspector, and persists with the file.
+
 ### MCP contract (Paper-style)
 
 Context first → incremental visible writes → exact reads → targeted edits → explicit finish:
 
 - **Reads:** `get_basic_info` (always first), `get_selection`, `get_tree_summary`,
   `get_children`, `get_node_info`, `get_html`, `get_jsx`, `get_computed_styles`,
-  `get_screenshot` (PNG of any artboard/node).
-- **Writes:** `create_artboard`, `write_html` (insert/before/after/replace),
+  `get_screenshot` (PNG of any artboard/node), `get_fonts`.
+- **Writes:** `create_artboard`, `write_html` (insert/before/after/replace, HTML + SVG subset),
   `update_styles`, `set_classes`, `set_text_content`, `move_nodes`, `duplicate_nodes`,
-  `delete_nodes`, `rename_nodes`.
+  `delete_nodes`, `rename_nodes`, `set_tokens`, `add_font`.
+- **Pages:** `create_page`, `open_page`.
 - **Components:** `create_component`, `create_instance`, `create_variant`,
   `set_instance_overrides`, `detach_instance`.
 - **Workflow:** `select_nodes`, `export` (html/jsx), `undo`, `finish`.

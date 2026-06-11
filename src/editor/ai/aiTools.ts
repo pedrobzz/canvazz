@@ -12,6 +12,8 @@ import {
   createInstance, createMainComponent, createVariant, detachInstance,
   setInstanceOverride, setInstanceVariant,
 } from '../components/componentCommands'
+import { DEFAULT_WEIGHTS, isValidFamily, syncDocumentFonts, verifyFontLoaded } from '../fonts'
+import { genId } from '../model/ids'
 import { createArtboard } from '../model/factory'
 import { editorStore } from '../store/editorStore'
 import type { EditorStore } from '../store/editorStore'
@@ -117,6 +119,10 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     return {
       document: { id: store.doc.id, name: store.doc.name, schemaVersion: store.doc.schemaVersion },
       page: { id: page.id, name: page.name, topLevelCount: page.children.length },
+      pages: store.doc.pages.map((p) => ({
+        id: p.id, name: p.name, isActive: p.id === store.doc.activePageId, topLevelCount: p.children.length,
+      })),
+      fonts: Object.keys(store.doc.fonts ?? {}),
       artboards,
       nodeCount: Object.keys(store.doc.nodes).length,
       components: Object.values(store.doc.components).map((c) => ({
@@ -454,6 +460,69 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       if (!ok) throw new Error(`Failed to apply override for ${sourceId}`)
     }
     return mutationResult('set_instance_overrides', [instanceId])
+  },
+
+  create_page(args) {
+    const name = String(args.name ?? 'Page').slice(0, 60)
+    const page = { id: genId('page'), name, children: [] }
+    store.apply(`AI: create page ${name}`, [
+      { t: 'addPage', page, index: store.doc.pages.length },
+    ], 'ai')
+    store.setActivePage(page.id)
+    return { ok: true, pageId: page.id, name, active: true }
+  },
+
+  open_page(args) {
+    const ref = String(args.page ?? '')
+    const page = store.doc.pages.find((p) => p.id === ref)
+      ?? store.doc.pages.find((p) => p.name.toLowerCase() === ref.toLowerCase())
+    if (!page) {
+      throw new Error(`Unknown page: ${ref}. Pages: ${store.doc.pages.map((p) => `${p.name} (${p.id})`).join(', ')}`)
+    }
+    store.setActivePage(page.id)
+    return { ok: true, pageId: page.id, name: page.name, topLevelCount: page.children.length }
+  },
+
+  set_tokens(args) {
+    const set = args.set as Record<string, string | null>
+    if (!set || Object.keys(set).length === 0) throw new Error('set{} is required')
+    const ops: Op[] = []
+    const rejected: string[] = []
+    for (const [name, value] of Object.entries(set)) {
+      if (!/^[\w-]{1,40}$/.test(name)) {
+        rejected.push(name)
+        continue
+      }
+      if (value === null) ops.push({ t: 'setToken', name, value: null })
+      else if (sanitizeStyle(`color: ${value}`).color) ops.push({ t: 'setToken', name, value })
+      else rejected.push(name)
+    }
+    if (ops.length === 0) throw new Error(`All tokens rejected: ${rejected.join(', ')}`)
+    store.apply('AI: set tokens', ops, 'ai')
+    return { ok: true, tokens: store.doc.tokens, rejected, undoable: true }
+  },
+
+  get_fonts() {
+    return {
+      documentFonts: store.doc.fonts ?? {},
+      builtin: ['system-ui', 'Arial', 'Helvetica Neue', 'Georgia', 'Times New Roman', 'Courier New', 'Menlo'],
+      usage: 'Reference document fonts as font-family: \'<Family>\', sans-serif. Add new ones with add_font.',
+    }
+  },
+
+  async add_font(args) {
+    const family = String(args.family ?? '').trim()
+    if (!isValidFamily(family)) throw new Error(`Invalid font family name: ${family}`)
+    const weights = Array.isArray(args.weights) && args.weights.length > 0
+      ? (args.weights as number[]).filter((w) => Number.isFinite(w))
+      : DEFAULT_WEIGHTS
+    store.apply(`AI: add font ${family}`, [
+      { t: 'setFont', family, font: { family, weights, source: 'google' } },
+    ], 'ai')
+    syncDocumentFonts(store.doc)
+    const loaded = await verifyFontLoaded(family)
+    return { ok: true, family, weights, loaded, undoable: true,
+      hint: loaded ? `Use font-family: '${family}', sans-serif` : 'Family not found on Google Fonts (kept in the document; verify the name)' }
   },
 
   select_nodes(args) {

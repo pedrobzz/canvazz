@@ -122,6 +122,43 @@ server.registerTool('get_screenshot', {
   inputSchema: { id: z.string().optional().describe('Node/artboard id; default first artboard') },
 }, forward('get_screenshot', 45_000))
 
+server.registerTool('create_page', {
+  title: 'Create a page',
+  description: 'Add a new page to the document and switch to it.',
+  inputSchema: { name: z.string().min(1).max(60) },
+}, forward('create_page'))
+
+server.registerTool('open_page', {
+  title: 'Switch the visible page',
+  description: 'Open a page by id or name (see get_basic_info → pages). Artboards you create land on the active page.',
+  inputSchema: { page: z.string().min(1).describe('Page id or name') },
+}, forward('open_page'))
+
+server.registerTool('set_tokens', {
+  title: 'Set color/design tokens',
+  description:
+    'Define or remove document tokens (CSS custom properties on the canvas root). Reference them anywhere as var(--name); editing a token recolors every usage instantly.',
+  inputSchema: {
+    set: z.record(z.string(), z.string().nullable()).describe('e.g. {"brand": "#0A9BFF", "old-token": null}'),
+  },
+}, forward('set_tokens'))
+
+server.registerTool('get_fonts', {
+  title: 'List available fonts',
+  description: 'Document fonts (loaded from Google Fonts) plus safe builtin families.',
+  inputSchema: {},
+}, forward('get_fonts'))
+
+server.registerTool('add_font', {
+  title: 'Add a Google font',
+  description:
+    'Load a Google Fonts family into the document (undoable). Returns loaded=false if the family does not exist.',
+  inputSchema: {
+    family: z.string().min(1).max(60).describe('e.g. "Space Grotesk"'),
+    weights: z.array(z.number()).optional().describe('Default [400, 500, 600, 700]'),
+  },
+}, forward('add_font', 30_000))
+
 // --- Targeted edits ---------------------------------------------------------
 
 server.registerTool('create_artboard', {
@@ -138,7 +175,7 @@ server.registerTool('create_artboard', {
 server.registerTool('write_html', {
   title: 'Write HTML to the canvas',
   description:
-    'Insert or replace real HTML/CSS/Tailwind. It is sanitized (scripts/handlers/unsafe CSS stripped — strip reasons returned), parsed into the model, and rendered live. Prefer several small writes over one giant one so the user sees progress. Use style="position:absolute; left/top" for free placement inside artboards, or flex containers for auto-layout.',
+    'Insert or replace real HTML/CSS/Tailwind, including a sanitized SVG subset (svg/path/circle/rect/gradients — use/foreignObject/external refs are stripped). Sanitized (scripts/handlers/unsafe CSS stripped — strip reasons returned), parsed into the model, and rendered live. Prefer several small writes over one giant one so the user sees progress. Use style="position:absolute; left/top" for free placement inside artboards, or flex containers for auto-layout.',
   inputSchema: {
     html: z.string().min(1).describe('HTML fragment. data-cz-name sets layer names.'),
     targetId: z.string().optional().describe('Container (insert into) or reference node (before/after/replace)'),
