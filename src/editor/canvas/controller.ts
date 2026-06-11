@@ -9,7 +9,7 @@ import {
 } from '../model/factory'
 import {
   canReceiveChildren, copyNodes, deleteNodes, duplicateNodes, groupNodes,
-  nudgeNodes, pasteHtml, reorderNodes, topMostOnly, ungroupNodes,
+  isTextNode, nudgeNodes, pasteHtml, reorderNodes, topMostOnly, ungroupNodes,
 } from '../commands'
 import { parsePathId } from '../model/instances'
 import type { Overlay } from './overlay'
@@ -942,7 +942,22 @@ export class InteractionController {
     if (e.metaKey || e.ctrlKey) return chain[chain.length - 1]
     const selected = this.store.ui.selection
     const existing = chain.find((id) => selected.includes(id))
-    return existing ?? chain[0]
+    return existing ?? this.aimTarget(chain)
+  }
+
+  /**
+   * One-click aiming: the deepest frame/shape under the cursor. Text leaves
+   * and instance internals are skipped — they take a double-click (and a
+   * second double-click starts text editing).
+   */
+  private aimTarget(chain: string[]): string {
+    for (let i = chain.length - 1; i >= 0; i--) {
+      const { sourceId, instanceId } = parsePathId(chain[i])
+      if (instanceId && instanceId !== chain[i]) continue
+      const node = this.store.doc.nodes[sourceId]
+      if (node && !isTextNode(node)) return chain[i]
+    }
+    return chain[0]
   }
 
   private updateHover(e: PointerEvent) {
@@ -959,7 +974,7 @@ export class InteractionController {
     if (e.metaKey || e.ctrlKey) return pathId
     const chain = this.selectionChain(pathId)
     const selected = this.store.ui.selection
-    return chain.find((id) => selected.includes(id)) ?? chain[0]
+    return chain.find((id) => selected.includes(id)) ?? this.aimTarget(chain)
   }
 
   /** Containers under the cursor that could receive dragged/drawn nodes. */

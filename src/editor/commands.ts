@@ -299,6 +299,17 @@ export function locate(store: EditorStore, id: NodeId): NodeLocation | null {
 
 const NEVER_CONTAINERS = new Set(['img', 'br', 'hr', 'input', 'textarea', 'select', 'option'])
 
+const TEXT_LEAF_TAGS = new Set([
+  'p', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'label',
+  'strong', 'em', 'b', 'i', 'u', 's', 'small', 'code', 'blockquote',
+])
+
+/** Text-like leaf: one-click selection skips these (double-click targets them). */
+export function isTextNode(node: NodeModel): boolean {
+  if (node.text !== undefined) return true
+  return TEXT_LEAF_TAGS.has(node.tag) && node.children.length === 0
+}
+
 /**
  * Whether a node can receive dropped/drawn children. Artboards always can;
  * otherwise any non-void element that isn't a text leaf and either already
