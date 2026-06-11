@@ -212,10 +212,15 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     if (!el) throw new Error('Nothing to screenshot — create an artboard first.')
     const maxSize = 1200
     const scale = Math.min(1, maxSize / Math.max(el.offsetWidth, el.offsetHeight, 1))
+    // The clone keeps the node's canvas placement (absolute left/top), which
+    // shifts content outside the capture viewport — zero it out. Downscale
+    // via canvas dimensions; pixelRatio < 1 renders blank in html-to-image.
     const dataUrl = await toPng(el, {
-      pixelRatio: scale,
+      pixelRatio: 1,
+      canvasWidth: Math.round(el.offsetWidth * scale),
+      canvasHeight: Math.round(el.offsetHeight * scale),
       skipFonts: true,
-      style: { transform: 'none', rotate: 'none' },
+      style: { transform: 'none', rotate: 'none', position: 'static', left: '0px', top: '0px', margin: '0' },
     })
     return { dataUrl, width: el.offsetWidth, height: el.offsetHeight }
   },

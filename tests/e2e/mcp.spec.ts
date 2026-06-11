@@ -162,11 +162,26 @@ test('component tools: create, instance, override, variant', async ({ page }) =>
   expect(instNode.variantId).toBe(variant.variantId)
 })
 
-test('get_screenshot returns a PNG image', async ({ page }) => {
+test('get_screenshot returns a PNG with actual artboard pixels', async ({ page }) => {
   const result = await callTool(page, 'get_screenshot', {})
   const image = result.content.find((c) => c.type === 'image')
   expect(image).toBeTruthy()
   expect(image?.data?.length ?? 0).toBeGreaterThan(1000)
+  // Regression: the clone once kept canvas placement (absolute left/top) and
+  // rasterized fully transparent. Verify the capture is opaque content.
+  const corner = await page.evaluate(async (b64) => {
+    const img = new Image()
+    img.src = 'data:image/png;base64,' + b64
+    await img.decode()
+    const canvas = document.createElement('canvas')
+    canvas.width = img.width
+    canvas.height = img.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('no 2d context')
+    ctx.drawImage(img, 0, 0)
+    return [...ctx.getImageData(2, 2, 1, 1).data]
+  }, image?.data ?? '')
+  expect(corner[3]).toBe(255) // alpha: opaque, not a blank capture
 })
 
 test('finish clears AI indicators and reports the log', async ({ page }) => {
