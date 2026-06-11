@@ -2,8 +2,9 @@ import { useRef, useState } from 'react'
 import {
   AlignCenter, AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal,
   AlignEndVertical, AlignJustify, AlignLeft, AlignRight, AlignStartHorizontal,
-  AlignStartVertical, ArrowDown, ArrowLeftRight, ArrowRight, ArrowUpDown,
-  MoveHorizontal, MoveVertical, UnfoldHorizontal, UnfoldVertical,
+  AlignStartVertical, ArrowDown, ArrowDownToLine, ArrowLeftRight, ArrowRight,
+  ArrowUpDown, ArrowUpToLine, FlipHorizontal2, FlipVertical2, MoveHorizontal,
+  MoveVertical, RotateCw, UnfoldHorizontal, UnfoldVertical,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -309,6 +310,50 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
     return write(set)
   }
 
+  // --- Transform actions: rotate 90deg steps and axis flips (CSS scale).
+  const rotate90 = () => {
+    const cur = s.rotate ? parseFloat(s.rotate) || 0 : 0
+    const next = (cur + 90) % 360
+    write({ rotate: next === 0 ? null : `${next}deg` }, 'Rotate')
+  }
+  const flip = (axis: 'x' | 'y') => {
+    const parts = (s.scale ?? '1 1').trim().split(/\s+/)
+    let sx = parts[0] ?? '1'
+    let sy = parts[1] ?? parts[0] ?? '1'
+    if (axis === 'x') sx = sx.startsWith('-') ? sx.slice(1) : `-${sx}`
+    else sy = sy.startsWith('-') ? sy.slice(1) : `-${sy}`
+    write({ scale: sx === '1' && sy === '1' ? null : `${sx} ${sy}` }, 'Flip')
+  }
+
+  // --- Constraints: which CSS props pin the box inside its parent.
+  const hAnchor = s.right && !s.left ? 'right' : s.left?.includes('calc(50%') ? 'center' : 'left'
+  const vAnchor = s.bottom && !s.top ? 'bottom' : s.top?.includes('calc(50%') ? 'center' : 'top'
+  const setAnchor = (axis: 'h' | 'v') => (mode: string) => {
+    const node = editorStore.doc.nodes[sourceId]
+    if (!node?.parent) return
+    const rect = controllerRef.current?.rectOf(sourceId)
+    const parentRect = controllerRef.current?.rectOf(node.parent)
+    if (!rect || !parentRect) return
+    const r = (n: number) => Math.round(n * 100) / 100
+    const set: Record<string, string | null> = {}
+    if (axis === 'h') {
+      const rel = rect.x - parentRect.x
+      if (mode === 'left') { set.left = fmtPx(rel); set.right = null }
+      if (mode === 'right') { set.right = fmtPx(parentRect.width - rel - rect.width); set.left = null }
+      if (mode === 'center') { set.left = `calc(50% + ${r(rel - parentRect.width / 2)}px)`; set.right = null }
+    } else {
+      const rel = rect.y - parentRect.y
+      if (mode === 'top') { set.top = fmtPx(rel); set.bottom = null }
+      if (mode === 'bottom') { set.bottom = fmtPx(parentRect.height - rel - rect.height); set.top = null }
+      if (mode === 'center') { set.top = `calc(50% + ${r(rel - parentRect.height / 2)}px)`; set.bottom = null }
+    }
+    write(set, 'Pin')
+  }
+
+  // Per-side / per-corner expanders.
+  const [padSides, setPadSides] = useState(false)
+  const [corners, setCorners] = useState(false)
+
   return (
     <>
       <Section title={multi ? `${pathIds.length} selected` : node.name}>
@@ -353,18 +398,27 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
       ) : null}
 
       <Section title="Position">
-        {isAbsolute ? (
+        <Row>
+          {isAbsolute ? (
+            <ActionRow
+              actions={[
+                { icon: <AlignStartHorizontal className="size-3.5" />, label: 'Align left', onClick: () => alignInParent(pathIds, 'left') },
+                { icon: <AlignCenterHorizontal className="size-3.5" />, label: 'Align horizontal centers', onClick: () => alignInParent(pathIds, 'hcenter') },
+                { icon: <AlignEndHorizontal className="size-3.5" />, label: 'Align right', onClick: () => alignInParent(pathIds, 'right') },
+                { icon: <AlignStartVertical className="size-3.5" />, label: 'Align top', onClick: () => alignInParent(pathIds, 'top') },
+                { icon: <AlignCenterVertical className="size-3.5" />, label: 'Align vertical centers', onClick: () => alignInParent(pathIds, 'vcenter') },
+                { icon: <AlignEndVertical className="size-3.5" />, label: 'Align bottom', onClick: () => alignInParent(pathIds, 'bottom') },
+              ]}
+            />
+          ) : null}
           <ActionRow
             actions={[
-              { icon: <AlignStartHorizontal className="size-3.5" />, label: 'Align left', onClick: () => alignInParent(pathIds, 'left') },
-              { icon: <AlignCenterHorizontal className="size-3.5" />, label: 'Align horizontal centers', onClick: () => alignInParent(pathIds, 'hcenter') },
-              { icon: <AlignEndHorizontal className="size-3.5" />, label: 'Align right', onClick: () => alignInParent(pathIds, 'right') },
-              { icon: <AlignStartVertical className="size-3.5" />, label: 'Align top', onClick: () => alignInParent(pathIds, 'top') },
-              { icon: <AlignCenterVertical className="size-3.5" />, label: 'Align vertical centers', onClick: () => alignInParent(pathIds, 'vcenter') },
-              { icon: <AlignEndVertical className="size-3.5" />, label: 'Align bottom', onClick: () => alignInParent(pathIds, 'bottom') },
+              { icon: <RotateCw className="size-3.5" />, label: 'Rotate 90°', onClick: rotate90 },
+              { icon: <FlipHorizontal2 className="size-3.5" />, label: 'Flip horizontal', onClick: () => flip('x') },
+              { icon: <FlipVertical2 className="size-3.5" />, label: 'Flip vertical', onClick: () => flip('y') },
             ]}
           />
-        ) : null}
+        </Row>
         <Row>
           <NumberField label="X" value={px(s.left)} onCommit={writeNum('left')} disabled={!isAbsolute} />
           <NumberField label="Y" value={px(s.top)} onCommit={writeNum('top')} disabled={!isAbsolute} />
@@ -386,6 +440,28 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
             onCommit={(v) => write(v === 'static' ? { position: null, left: null, top: null } : { position: v })}
           />
         </Row>
+        {isAbsolute && parent ? (
+          <Row>
+            <SelectField
+              value={hAnchor}
+              options={[
+                { value: 'left', label: 'Left' },
+                { value: 'right', label: 'Right' },
+                { value: 'center', label: 'Center' },
+              ]}
+              onCommit={setAnchor('h')}
+            />
+            <SelectField
+              value={vAnchor}
+              options={[
+                { value: 'top', label: 'Top' },
+                { value: 'bottom', label: 'Bottom' },
+                { value: 'center', label: 'Center' },
+              ]}
+              onCommit={setAnchor('v')}
+            />
+          </Row>
+        ) : null}
       </Section>
 
       <Section title="Layout">
@@ -459,21 +535,49 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
                 </Row>
               </>
             ) : null}
-            <div className="text-[10px] text-[var(--cz-panel-muted)]">Padding</div>
-            <Row>
-              <NumberField
-                label={<ArrowLeftRight className="size-3" aria-label="Horizontal padding" />}
-                value={px(s['padding-left'] ?? s.padding) ?? 0}
-                min={0}
-                onCommit={writePair(['padding-left', 'padding-right'], 'padding', ['padding-top', 'padding-bottom'])}
-              />
-              <NumberField
-                label={<ArrowUpDown className="size-3" aria-label="Vertical padding" />}
-                value={px(s['padding-top'] ?? s.padding) ?? 0}
-                min={0}
-                onCommit={writePair(['padding-top', 'padding-bottom'], 'padding', ['padding-left', 'padding-right'])}
-              />
-            </Row>
+            <div className="flex items-center justify-between text-[10px] text-[var(--cz-panel-muted)]">
+              Padding
+              <button
+                type="button"
+                aria-label="Independent padding"
+                aria-pressed={padSides}
+                className={padSides ? 'text-[var(--cz-accent)]' : 'hover:text-white'}
+                onClick={() => setPadSides(!padSides)}
+              >
+                ⛶
+              </button>
+            </div>
+            {padSides ? (
+              <>
+                <Row>
+                  <NumberField label="T" value={px(s['padding-top'] ?? s.padding) ?? 0} min={0}
+                    onCommit={(v) => write({ 'padding-top': `${v}px`, padding: null })} />
+                  <NumberField label="R" value={px(s['padding-right'] ?? s.padding) ?? 0} min={0}
+                    onCommit={(v) => write({ 'padding-right': `${v}px`, padding: null })} />
+                </Row>
+                <Row>
+                  <NumberField label="B" value={px(s['padding-bottom'] ?? s.padding) ?? 0} min={0}
+                    onCommit={(v) => write({ 'padding-bottom': `${v}px`, padding: null })} />
+                  <NumberField label="L" value={px(s['padding-left'] ?? s.padding) ?? 0} min={0}
+                    onCommit={(v) => write({ 'padding-left': `${v}px`, padding: null })} />
+                </Row>
+              </>
+            ) : (
+              <Row>
+                <NumberField
+                  label={<ArrowLeftRight className="size-3" aria-label="Horizontal padding" />}
+                  value={px(s['padding-left'] ?? s.padding) ?? 0}
+                  min={0}
+                  onCommit={writePair(['padding-left', 'padding-right'], 'padding', ['padding-top', 'padding-bottom'])}
+                />
+                <NumberField
+                  label={<ArrowUpDown className="size-3" aria-label="Vertical padding" />}
+                  value={px(s['padding-top'] ?? s.padding) ?? 0}
+                  min={0}
+                  onCommit={writePair(['padding-top', 'padding-bottom'], 'padding', ['padding-left', 'padding-right'])}
+                />
+              </Row>
+            )}
             <SelectField
               value={s.overflow ?? 'visible'}
               options={[
@@ -533,7 +637,32 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
             min={0}
             onCommit={writeNum('border-radius')}
           />
+          <button
+            type="button"
+            aria-label="Independent corners"
+            aria-pressed={corners}
+            className={`shrink-0 text-[10px] ${corners ? 'text-[var(--cz-accent)]' : 'text-[var(--cz-panel-muted)] hover:text-white'}`}
+            onClick={() => setCorners(!corners)}
+          >
+            ⛶
+          </button>
         </Row>
+        {corners ? (
+          <>
+            <Row>
+              <NumberField label="◜" value={px(s['border-top-left-radius'] ?? s['border-radius']) ?? 0} min={0}
+                onCommit={(v) => write({ 'border-top-left-radius': `${v}px`, 'border-radius': null })} />
+              <NumberField label="◝" value={px(s['border-top-right-radius'] ?? s['border-radius']) ?? 0} min={0}
+                onCommit={(v) => write({ 'border-top-right-radius': `${v}px`, 'border-radius': null })} />
+            </Row>
+            <Row>
+              <NumberField label="◟" value={px(s['border-bottom-left-radius'] ?? s['border-radius']) ?? 0} min={0}
+                onCommit={(v) => write({ 'border-bottom-left-radius': `${v}px`, 'border-radius': null })} />
+              <NumberField label="◞" value={px(s['border-bottom-right-radius'] ?? s['border-radius']) ?? 0} min={0}
+                onCommit={(v) => write({ 'border-bottom-right-radius': `${v}px`, 'border-radius': null })} />
+            </Row>
+          </>
+        ) : null}
         <label className="flex items-center justify-between text-[11px] text-[var(--cz-panel-fg)]">
           Clip content
           <Switch
@@ -551,7 +680,73 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
         />
       </Section>
 
-      <Section title="Fill">
+      {isText ? (
+        <>
+          <Section title="Typography">
+            <FontFamilyField value={s['font-family'] ?? ''} onCommit={(v) => write({ 'font-family': v || null })} />
+            <Row>
+              <NumberField label="Size" value={px(s['font-size']) ?? 16} min={1} onCommit={writeNum('font-size')} />
+              <SelectField
+                value={s['font-weight'] ?? '400'}
+                options={[
+                  { value: '300', label: 'Light' },
+                  { value: '400', label: 'Regular' },
+                  { value: '500', label: 'Medium' },
+                  { value: '600', label: 'Semibold' },
+                  { value: '700', label: 'Bold' },
+                  { value: '800', label: 'Extrabold' },
+                ]}
+                onCommit={(v) => write({ 'font-weight': v === '400' ? null : v })}
+              />
+            </Row>
+            <Row>
+              <NumberField
+                label="LH"
+                value={s['line-height'] ? parseFloat(s['line-height']) || null : null}
+                step={0.1}
+                unit=""
+                onCommit={(v) => write({ 'line-height': String(v) })}
+              />
+              <NumberField
+                label="LS"
+                value={letterSpacingPct(s)}
+                step={0.5}
+                unit="%"
+                onCommit={(v) => write({ 'letter-spacing': v === 0 ? null : `${Math.round(v * 100) / 10000}em` })}
+              />
+            </Row>
+            <Row>
+              <IconRow
+                ariaLabel="Text align"
+                value={(s['text-align'] as 'left' | 'center' | 'right' | 'justify' | undefined) ?? 'left'}
+                options={[
+                  { value: 'left', icon: <AlignLeft className="size-3.5" />, label: 'Left' },
+                  { value: 'center', icon: <AlignCenter className="size-3.5" />, label: 'Center' },
+                  { value: 'right', icon: <AlignRight className="size-3.5" />, label: 'Right' },
+                  { value: 'justify', icon: <AlignJustify className="size-3.5" />, label: 'Justify' },
+                ]}
+                onChange={(v) => write({ 'text-align': v === 'left' ? null : v })}
+              />
+              <IconRow
+                ariaLabel="Vertical align"
+                value={s['align-content'] === 'center' ? 'center' : s['align-content'] === 'end' ? 'end' : 'start'}
+                options={[
+                  { value: 'start', icon: <ArrowUpToLine className="size-3.5" />, label: 'Top' },
+                  { value: 'center', icon: <AlignCenterVertical className="size-3.5" />, label: 'Middle' },
+                  { value: 'end', icon: <ArrowDownToLine className="size-3.5" />, label: 'Bottom' },
+                ]}
+                onChange={(v) => write({ 'align-content': v === 'start' ? null : v })}
+              />
+            </Row>
+          </Section>
+
+          <Section title="Text Fill">
+            <ColorField label="Color" value={s.color ?? ''} allowEmpty onCommit={(v) => write({ color: v })} />
+          </Section>
+        </>
+      ) : null}
+
+      <Section title="Background Fill">
         <ColorField
           label="Color"
           value={s['background-color'] ?? ''}
@@ -577,104 +772,10 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
         ) : null}
       </Section>
 
-      <Section title="Border">
-        <Row>
-          <NumberField
-            label="W"
-            value={px(s['border-width']) ?? (s.border ? null : 0)}
-            min={0}
-            onCommit={(v) =>
-              write(v === 0
-                ? { border: null, 'border-width': null, 'border-style': null }
-                : { 'border-width': `${v}px`, 'border-style': s['border-style'] ?? 'solid' })
-            }
-          />
-          <SelectField
-            value={s['border-style'] ?? 'solid'}
-            options={[
-              { value: 'solid', label: 'Solid' },
-              { value: 'dashed', label: 'Dashed' },
-              { value: 'dotted', label: 'Dotted' },
-            ]}
-            onCommit={(v) => write({ 'border-style': v })}
-          />
-        </Row>
-        <ColorField
-          label="Color"
-          value={s['border-color'] ?? ''}
-          allowEmpty
-          onCommit={(v) => write({ 'border-color': v })}
-        />
-      </Section>
-
-      {isText ? (
-        <Section title="Typography">
-          <TextField
-            value={s['font-family'] ?? ''}
-            placeholder="font family"
-            onCommit={(v) => write({ 'font-family': v || null })}
-          />
-          <Row>
-            <NumberField label="Size" value={px(s['font-size']) ?? 16} min={1} onCommit={writeNum('font-size')} />
-            <SelectField
-              value={s['font-weight'] ?? '400'}
-              options={[
-                { value: '300', label: 'Light' },
-                { value: '400', label: 'Regular' },
-                { value: '500', label: 'Medium' },
-                { value: '600', label: 'Semibold' },
-                { value: '700', label: 'Bold' },
-                { value: '800', label: 'Extrabold' },
-              ]}
-              onCommit={(v) => write({ 'font-weight': v === '400' ? null : v })}
-            />
-          </Row>
-          <Row>
-            <NumberField
-              label="LH"
-              value={s['line-height'] ? parseFloat(s['line-height']) || null : null}
-              step={0.1}
-              unit=""
-              onCommit={(v) => write({ 'line-height': String(v) })}
-            />
-            <NumberField
-              label="LS"
-              value={px(s['letter-spacing']) ?? 0}
-              step={0.1}
-              onCommit={(v) => write({ 'letter-spacing': v === 0 ? null : `${v}px` })}
-            />
-          </Row>
-          <Row>
-            <IconRow
-              ariaLabel="Text align"
-              value={(s['text-align'] as 'left' | 'center' | 'right' | 'justify' | undefined) ?? 'left'}
-              options={[
-                { value: 'left', icon: <AlignLeft className="size-3.5" />, label: 'Left' },
-                { value: 'center', icon: <AlignCenter className="size-3.5" />, label: 'Center' },
-                { value: 'right', icon: <AlignRight className="size-3.5" />, label: 'Right' },
-                { value: 'justify', icon: <AlignJustify className="size-3.5" />, label: 'Justify' },
-              ]}
-              onChange={(v) => write({ 'text-align': v === 'left' ? null : v })}
-            />
-          </Row>
-          <ColorField label="Color" value={s.color ?? ''} allowEmpty onCommit={(v) => write({ color: v })} />
-        </Section>
-      ) : null}
-
-      <Section title="Effects">
-        <TextField
-          value={s['box-shadow'] ?? ''}
-          placeholder="box shadow…"
-          mono
-          onCommit={(v) => write({ 'box-shadow': v || null })}
-        />
-        <TextField
-          value={s.filter ?? ''}
-          placeholder="filter: blur(4px)…"
-          mono
-          onCommit={(v) => write({ filter: v || null })}
-        />
-      </Section>
+      <BorderSection s={s} write={write} />
+      <OutlineSection s={s} write={write} />
+      <ShadowSection s={s} write={write} />
+      <FiltersSection s={s} write={write} />
 
       <Section title="Tailwind classes">
         <TextField
@@ -695,6 +796,147 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
 
       {!multi ? <ExportSection pathId={pathIds[0]} /> : null}
     </>
+  )
+}
+
+/** Letter spacing displayed as % of font size (Figma-style). */
+function letterSpacingPct(s: Record<string, string>): number {
+  const raw = s['letter-spacing']
+  if (!raw) return 0
+  const fontSize = px(s['font-size']) ?? 16
+  const n = parseFloat(raw)
+  if (Number.isNaN(n)) return 0
+  if (raw.endsWith('em')) return Math.round(n * 10000) / 100
+  if (raw.endsWith('px')) return Math.round((n / fontSize) * 10000) / 100
+  return 0
+}
+
+const FONT_STACKS = [
+  'Inter', 'system-ui', 'Arial', 'Helvetica Neue', 'Georgia',
+  'Times New Roman', 'Courier New', 'Menlo',
+]
+
+function FontFamilyField({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const options = [
+    { value: '', label: 'Default' },
+    ...FONT_STACKS.map((f) => ({ value: f, label: f })),
+    ...(value && !FONT_STACKS.includes(value) ? [{ value, label: value }] : []),
+  ]
+  return <SelectField value={value} options={options} onCommit={onCommit} />
+}
+
+type StyleWrite = (set: Record<string, string | null>, label?: string) => void
+
+const BORDER_SIDES = ['all', 'top', 'right', 'bottom', 'left'] as const
+
+function BorderSection({ s, write }: { s: Record<string, string>; write: StyleWrite }) {
+  const [side, setSide] = useState<(typeof BORDER_SIDES)[number]>('all')
+  const prop = (suffix: string) => (side === 'all' ? `border-${suffix}` : `border-${side}-${suffix}`)
+  const width = px(s[prop('width')])
+  return (
+    <Section title="Border">
+      <Row>
+        <NumberField
+          label="W"
+          value={width ?? (s.border || s[prop('width')] ? null : 0)}
+          min={0}
+          onCommit={(v) =>
+            write(v === 0 && side === 'all'
+              ? { border: null, 'border-width': null, 'border-style': null }
+              : { [prop('width')]: `${v}px`, [prop('style')]: s[prop('style')] ?? 'solid' })
+          }
+        />
+        <SelectField
+          value={side}
+          options={BORDER_SIDES.map((v) => ({ value: v, label: v === 'all' ? 'All' : v[0].toUpperCase() + v.slice(1) }))}
+          onCommit={(v) => setSide(v as (typeof BORDER_SIDES)[number])}
+        />
+      </Row>
+      <Row>
+        <SelectField
+          value={s[prop('style')] ?? 'solid'}
+          options={[
+            { value: 'solid', label: 'Solid' },
+            { value: 'dashed', label: 'Dashed' },
+            { value: 'dotted', label: 'Dotted' },
+          ]}
+          onCommit={(v) => write({ [prop('style')]: v })}
+        />
+      </Row>
+      <ColorField
+        label="Color"
+        value={s[prop('color')] ?? ''}
+        allowEmpty
+        onCommit={(v) => write({ [prop('color')]: v })}
+      />
+    </Section>
+  )
+}
+
+function OutlineSection({ s, write }: { s: Record<string, string>; write: StyleWrite }) {
+  const has = Boolean(s.outline || s['outline-width'])
+  return (
+    <Section title="Outline" collapsible defaultOpen={has}>
+      <Row>
+        <NumberField label="W" value={px(s['outline-width']) ?? 0} min={0}
+          onCommit={(v) => write(v === 0
+            ? { outline: null, 'outline-width': null, 'outline-style': null, 'outline-offset': null }
+            : { 'outline-width': `${v}px`, 'outline-style': s['outline-style'] ?? 'solid' })} />
+        <NumberField label="Off" value={px(s['outline-offset']) ?? 0}
+          onCommit={(v) => write({ 'outline-offset': v === 0 ? null : `${v}px` })} />
+      </Row>
+      <ColorField label="Color" value={s['outline-color'] ?? ''} allowEmpty
+        onCommit={(v) => write({ 'outline-color': v })} />
+    </Section>
+  )
+}
+
+const SHADOW_RE = /^(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px(?:\s+(-?[\d.]+)px)?\s+(.+)$/
+
+function ShadowSection({ s, write }: { s: Record<string, string>; write: StyleWrite }) {
+  const raw = (s['box-shadow'] ?? '').trim()
+  const m = SHADOW_RE.exec(raw)
+  const cur = m
+    ? { x: +m[1], y: +m[2], blur: +m[3], spread: m[4] ? +m[4] : 0, color: m[5] }
+    : { x: 0, y: 2, blur: 8, spread: 0, color: 'rgba(0,0,0,0.25)' }
+  const set = (patch: Partial<typeof cur>) => {
+    const next = { ...cur, ...patch }
+    write({ 'box-shadow': `${next.x}px ${next.y}px ${next.blur}px ${next.spread}px ${next.color}` })
+  }
+  // Multi-shadow or exotic values fall back to the raw editor.
+  const structured = !raw || Boolean(m)
+  return (
+    <Section title="Shadow" collapsible defaultOpen={Boolean(raw)}>
+      {structured ? (
+        <>
+          <Row>
+            <NumberField label="X" value={raw ? cur.x : null} onCommit={(v) => set({ x: v })} />
+            <NumberField label="Y" value={raw ? cur.y : null} onCommit={(v) => set({ y: v })} />
+          </Row>
+          <Row>
+            <NumberField label="Blur" value={raw ? cur.blur : null} min={0} onCommit={(v) => set({ blur: v })} />
+            <NumberField label="Spr" value={raw ? cur.spread : null} onCommit={(v) => set({ spread: v })} />
+          </Row>
+          <ColorField label="Color" value={raw ? cur.color : ''} allowEmpty
+            onCommit={(v) => (v ? set({ color: v }) : write({ 'box-shadow': null }))} />
+        </>
+      ) : (
+        <TextField value={raw} mono placeholder="box shadow…"
+          onCommit={(v) => write({ 'box-shadow': v || null })} />
+      )}
+    </Section>
+  )
+}
+
+function FiltersSection({ s, write }: { s: Record<string, string>; write: StyleWrite }) {
+  const has = Boolean(s.filter || s['backdrop-filter'])
+  return (
+    <Section title="Filters" collapsible defaultOpen={has}>
+      <TextField value={s.filter ?? ''} placeholder="filter: blur(4px)…" mono
+        onCommit={(v) => write({ filter: v || null })} />
+      <TextField value={s['backdrop-filter'] ?? ''} placeholder="backdrop blur…" mono
+        onCommit={(v) => write({ 'backdrop-filter': v || null })} />
+    </Section>
   )
 }
 

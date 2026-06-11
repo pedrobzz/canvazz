@@ -111,6 +111,14 @@ are sibling definitions grouped in a component set. Detach materializes the reso
 Instance internals are selectable on canvas (`instanceId:sourceId` path ids) and editable as
 overrides from the inspector.
 
+### Design System & color tokens
+
+Creating a component moves the main to a dedicated **Design System** page (a real,
+freely editable page) and leaves a linked instance in its place. **Color tokens** are
+CSS custom properties on the canvas root: define once in the Assets ▸ Colors panel,
+apply anywhere via the ◇ picker (`var(--name)`), and one edit recolors every usage.
+Exports embed the tokens so the generated HTML/JSX stands alone.
+
 ### MCP contract (Paper-style)
 
 Context first → incremental visible writes → exact reads → targeted edits → explicit finish:

@@ -420,18 +420,36 @@ export function ActionRow({
   )
 }
 
-export function Section({ title, children, actions }: {
+export function Section({ title, children, actions, collapsible, defaultOpen = true }: {
   title: string
   children: React.ReactNode
   actions?: React.ReactNode
+  /** Collapsed sections render as a "+" header row, like Figma's add-ables. */
+  collapsible?: boolean
+  defaultOpen?: boolean
 }) {
+  const [open, setOpen] = useState(defaultOpen)
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+  const showBody = !collapsible || open
   return (
-    <div className="border-b border-[var(--cz-panel-border)] px-3 py-2.5">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-[11px] font-semibold text-[var(--cz-panel-fg)]">{title}</span>
+    <div className="border-b border-[var(--cz-panel-border)] px-3 py-2.5" data-section={slug}>
+      <div className={`flex items-center justify-between ${showBody ? 'mb-2' : ''}`}>
+        {collapsible ? (
+          <button
+            type="button"
+            aria-expanded={open}
+            className="flex flex-1 items-center justify-between text-[11px] font-semibold text-[var(--cz-panel-fg)]"
+            onClick={() => setOpen(!open)}
+          >
+            {title}
+            <span className="text-[13px] leading-none text-[var(--cz-panel-muted)]">{open ? '−' : '+'}</span>
+          </button>
+        ) : (
+          <span className="text-[11px] font-semibold text-[var(--cz-panel-fg)]">{title}</span>
+        )}
         {actions}
       </div>
-      <div className="flex flex-col gap-1.5">{children}</div>
+      {showBody ? <div className="flex flex-col gap-1.5">{children}</div> : null}
     </div>
   )
 }

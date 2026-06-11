@@ -290,7 +290,7 @@ test('layer tree shows auto-layout children in flow order and drags WYSIWYG', as
 test('inspector color swatch stays compact (no row overflow)', async ({ page }) => {
   const card = await centerOf(page, 'card-1')
   await page.mouse.click(card.x, card.y)
-  const swatch = page.locator('[data-testid="inspector"] input[type="color"]').first()
+  const swatch = page.locator('[data-section="background-fill"] input[type="color"]').first()
   const box = await swatch.boundingBox()
   expect(box?.width ?? 999).toBeLessThanOrEqual(32)
   const overflow = await page
@@ -345,10 +345,8 @@ test('instance inspector shows inherited definition styles', async ({ page }) =>
   const sel = await selection(page)
   const instanceId = sel[0]
   expect(await nodeField(page, instanceId, 'componentId')).toBeTruthy()
-  // Fill section shows the definition's background, not "none".
-  const fillValue = page
-    .locator('[data-testid="inspector"] input[type="color"]')
-    .first()
+  // Background Fill shows the definition's background, not "none".
+  const fillValue = page.locator('[data-section="background-fill"] input[type="color"]').first()
   await expect(fillValue).toHaveValue('#4f8ef7')
 })
 
@@ -369,9 +367,12 @@ test('color tokens recolor every usage instantly and export standalone', async (
   await expect(page.locator('[data-node-id="hero-1"]')).toHaveCSS('background-color', 'rgb(0, 255, 0)')
   // Exports embed the token so the HTML stands alone.
   const html = await page.evaluate(async () => {
-    const { exportHtml } = await import('/src/editor/compiler/export.ts')
+    // Vite dev-server module path; not resolvable by the test's TS project.
+    const mod = (await import(/* @vite-ignore */ '/src/editor/compiler/export.ts' as string)) as {
+      exportHtml: (doc: unknown, id: string) => string
+    }
     const cz = (window as never as { __canvazz: { editorStore: { doc: unknown } } }).__canvazz
-    return exportHtml(cz.editorStore.doc as never, 'hero-1')
+    return mod.exportHtml(cz.editorStore.doc, 'hero-1')
   })
   expect(html).toContain('--brand: #00ff00')
   expect(html).toContain('var(--brand)')
@@ -396,4 +397,31 @@ test('create component moves main to the Design System page, leaves instance', a
   // The Design System page is a real page: switch to it and see the main.
   await page.getByText('Design System').click()
   await expect(page.locator('[data-node-id="card-1"]')).toBeVisible()
+})
+
+test('constraints: right-pin re-anchors without moving the box', async ({ page }) => {
+  await select(page, ['card-1'])
+  const before = await page.locator('[data-node-id="card-1"]').boundingBox()
+  // Position selects: [position mode, H anchor, V anchor]
+  await page.locator('[data-section="position"] select').nth(1).selectOption('right')
+  expect(await nodeStyle(page, 'card-1', 'right')).toMatch(/px$/)
+  expect(await nodeStyle(page, 'card-1', 'left')).toBeUndefined()
+  const after = await page.locator('[data-node-id="card-1"]').boundingBox()
+  expect(Math.abs((after?.x ?? 0) - (before?.x ?? 0))).toBeLessThan(2)
+  // And back to left-pin.
+  await page.locator('[data-section="position"] select').nth(1).selectOption('left')
+  expect(await nodeStyle(page, 'card-1', 'left')).toMatch(/px$/)
+  expect(await nodeStyle(page, 'card-1', 'right')).toBeUndefined()
+})
+
+test('rotate 90 and flip actions write rotate/scale styles', async ({ page }) => {
+  await select(page, ['hero-1'])
+  await page.getByRole('button', { name: 'Rotate 90°' }).click()
+  expect(await nodeStyle(page, 'hero-1', 'rotate')).toBe('90deg')
+  await page.getByRole('button', { name: 'Flip horizontal' }).click()
+  expect(await nodeStyle(page, 'hero-1', 'scale')).toBe('-1 1')
+  await page.getByRole('button', { name: 'Flip vertical' }).click()
+  expect(await nodeStyle(page, 'hero-1', 'scale')).toBe('-1 -1')
+  await page.getByRole('button', { name: 'Flip horizontal' }).click()
+  expect(await nodeStyle(page, 'hero-1', 'scale')).toBe('1 -1')
 })
