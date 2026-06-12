@@ -14,13 +14,13 @@ it becomes relevant only if shared projects/multiplayer are added (see *Collabor
 
 ```sh
 bun install
-bun run dev          # http://localhost:3000
+bun run dev          # http://localhost:47823
 ```
 
 Connect an AI agent over MCP (Claude Code example):
 
 ```sh
-claude mcp add --transport http canvazz http://localhost:3000/mcp
+claude mcp add --transport http canvazz http://localhost:47823/mcp
 ```
 
 Keep the editor open in a browser — the MCP server forwards tool calls to the live tab over

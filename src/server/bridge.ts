@@ -56,7 +56,7 @@ export function dispatchToEditor(
   if (!client) {
     return Promise.reject(
       new Error(
-        'No editor connected. Open the Canvazz editor (default http://localhost:3000) in a browser, then retry.',
+        'No editor connected. Open the Canvazz editor (default http://localhost:47823) in a browser, then retry.',
       ),
     )
   }

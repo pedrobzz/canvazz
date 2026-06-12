@@ -6,7 +6,7 @@
     "#/*": "./src/*"
   },
   "scripts": {
-    "dev": "vite dev --port 3000",
+    "dev": "vite dev --port 47823",
     "build": "vite build",
     "preview": "vite preview",
     "generate-routes": "tsr generate",

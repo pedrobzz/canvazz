@@ -14,7 +14,7 @@ import { dispatchToEditor } from '#/server/bridge'
  * Every mutation is transactional, undoable, sanitized, and returns changed
  * node ids plus summaries so follow-up reads are rarely needed.
  *
- * Connect: claude mcp add --transport http canvazz http://localhost:3000/mcp
+ * Connect: claude mcp add --transport http canvazz http://localhost:47823/mcp
  */
 
 const server = new McpServer({ name: 'canvazz', version: '1.0.0' })

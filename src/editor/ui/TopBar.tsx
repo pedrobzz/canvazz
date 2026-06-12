@@ -44,7 +44,7 @@ export function TopBar() {
           title={
             bridge === 'connected'
               ? 'An MCP client is bridged to this editor'
-              : 'Connect an MCP client: claude mcp add --transport http canvazz http://localhost:3000/mcp'
+              : 'Connect an MCP client: claude mcp add --transport http canvazz http://localhost:47823/mcp'
           }
         >
           <Cable className="size-3" />
