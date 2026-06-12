@@ -282,3 +282,76 @@ body {
 .cz-panel ::placeholder {
   color: var(--cz-panel-muted);
 }
+
+/* Boxed inspector field: [icon][input][unit]. The icon doubles as a scrub
+ * handle, so it gets the resize cursor and swallows text selection. */
+.cz-panel .cz-field {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 26px;
+  background: var(--cz-panel-hover);
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+.cz-panel .cz-field:focus-within {
+  border-color: var(--cz-accent);
+}
+.cz-panel .cz-field[data-disabled='true'] {
+  opacity: 0.45;
+}
+.cz-panel .cz-field input {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0 2px;
+  height: 100%;
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+}
+.cz-panel .cz-field input:focus {
+  border: none;
+}
+.cz-field-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 24px;
+  height: 100%;
+  padding: 0 2px 0 6px;
+  color: var(--cz-panel-muted);
+  font-size: 10px;
+  user-select: none;
+  touch-action: none;
+}
+.cz-field-handle[data-scrub] {
+  cursor: ew-resize;
+}
+.cz-field-handle[data-scrub]:hover {
+  color: var(--cz-panel-fg);
+}
+.cz-field-unit {
+  flex: none;
+  padding-right: 7px;
+  font-size: 10px;
+  color: var(--cz-panel-muted);
+  user-select: none;
+}
+.cz-panel .cz-field input.cz-swatch {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--cz-panel-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.cz-panel input[type='checkbox'] {
+  appearance: auto;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin: 0;
+  accent-color: var(--cz-accent);
+}

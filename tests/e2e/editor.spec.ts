@@ -118,7 +118,7 @@ test('double-click deep-selects and edits text in place', async ({ page }) => {
 test('inspector edits width and background live', async ({ page }) => {
   const card = await centerOf(page, 'card-1')
   await page.mouse.click(card.x, card.y)
-  const w = page.locator('select[aria-label="W sizing mode"]').locator('..').locator('input')
+  const w = page.locator('input[aria-label="Width"]')
   await w.fill('300')
   await w.press('Enter')
   expect(await nodeStyle(page, 'card-1', 'width')).toBe('300px')
@@ -290,7 +290,7 @@ test('layer tree shows auto-layout children in flow order and drags WYSIWYG', as
 test('inspector color swatch stays compact (no row overflow)', async ({ page }) => {
   const card = await centerOf(page, 'card-1')
   await page.mouse.click(card.x, card.y)
-  const swatch = page.locator('[data-section="background-fill"] input[type="color"]').first()
+  const swatch = page.locator('[data-section="background"] input[type="color"]').first()
   const box = await swatch.boundingBox()
   expect(box?.width ?? 999).toBeLessThanOrEqual(32)
   const overflow = await page
@@ -303,24 +303,29 @@ test('W/H sizing modes: fill is direction-aware, values accept %', async ({ page
   // Button is a flow child of the flex-COLUMN card.
   await select(page, ['button-1'])
 
+  const pickMode = async (axis: 'W' | 'H', mode: string) => {
+    await page.locator(`button[aria-label="${axis} sizing mode"]`).click()
+    await page.getByRole('menuitem', { name: mode }).click()
+  }
+
   // W: Fill in a column parent = stretch on the cross axis, NOT flex-grow.
-  await page.locator('select[aria-label="W sizing mode"]').selectOption('fill')
+  await pickMode('W', 'Fill container')
   expect(await nodeStyle(page, 'button-1', 'align-self')).toBe('stretch')
   expect(await nodeStyle(page, 'button-1', 'flex-grow')).toBeUndefined()
 
   // H: Fill in a column parent = main axis = flex-grow.
-  await page.locator('select[aria-label="H sizing mode"]').selectOption('fill')
+  await pickMode('H', 'Fill container')
   expect(await nodeStyle(page, 'button-1', 'flex-grow')).toBe('1')
   expect(await nodeStyle(page, 'button-1', 'height')).toBeUndefined()
 
   // Typing a percentage commits it as-is.
-  const wInput = page.locator('select[aria-label="W sizing mode"]').locator('..').locator('input')
+  const wInput = page.locator('input[aria-label="Width"]')
   await wInput.fill('50%')
   await wInput.press('Enter')
   expect(await nodeStyle(page, 'button-1', 'width')).toBe('50%')
 
   // H: Fit hugs content (height removed, grow cleared).
-  await page.locator('select[aria-label="H sizing mode"]').selectOption('fit')
+  await pickMode('H', 'Fit content')
   expect(await nodeStyle(page, 'button-1', 'flex-grow')).toBeUndefined()
   expect(await nodeStyle(page, 'button-1', 'height')).toBeUndefined()
 })
@@ -346,7 +351,7 @@ test('instance inspector shows inherited definition styles', async ({ page }) =>
   const instanceId = sel[0]
   expect(await nodeField(page, instanceId, 'componentId')).toBeTruthy()
   // Background Fill shows the definition's background, not "none".
-  const fillValue = page.locator('[data-section="background-fill"] input[type="color"]').first()
+  const fillValue = page.locator('[data-section="background"] input[type="color"]').first()
   await expect(fillValue).toHaveValue('#4f8ef7')
 })
 
@@ -402,14 +407,14 @@ test('create component moves main to the Design System page, leaves instance', a
 test('constraints: right-pin re-anchors without moving the box', async ({ page }) => {
   await select(page, ['card-1'])
   const before = await page.locator('[data-node-id="card-1"]').boundingBox()
-  // Position selects: [position mode, H anchor, V anchor]
-  await page.locator('[data-section="position"] select').nth(1).selectOption('right')
+  // Position selects: [H anchor, V anchor] (absolute toggle lives in the header)
+  await page.locator('[data-section="position"] select').nth(0).selectOption('right')
   expect(await nodeStyle(page, 'card-1', 'right')).toMatch(/px$/)
   expect(await nodeStyle(page, 'card-1', 'left')).toBeUndefined()
   const after = await page.locator('[data-node-id="card-1"]').boundingBox()
   expect(Math.abs((after?.x ?? 0) - (before?.x ?? 0))).toBeLessThan(2)
   // And back to left-pin.
-  await page.locator('[data-section="position"] select').nth(1).selectOption('left')
+  await page.locator('[data-section="position"] select').nth(0).selectOption('left')
   expect(await nodeStyle(page, 'card-1', 'left')).toMatch(/px$/)
   expect(await nodeStyle(page, 'card-1', 'right')).toBeUndefined()
 })

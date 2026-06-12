@@ -32,6 +32,8 @@ interface HistoryEntry {
   tx: Transaction
   selectionBefore: NodeId[]
   selectionAfter: NodeId[]
+  /** Commits sharing this key fold into one entry (drag-scrub gestures). */
+  mergeKey?: string
 }
 
 export interface LogEntry {
@@ -108,13 +110,36 @@ export class EditorStore {
 
   // --- Mutations -----------------------------------------------------------
 
-  apply(label: string, ops: Op[], source: TransactionSource = 'user'): Transaction | null {
+  apply(
+    label: string,
+    ops: Op[],
+    source: TransactionSource = 'user',
+    opts?: { mergeKey?: string },
+  ): Transaction | null {
     if (ops.length === 0) return null
     const selectionBefore = this.ui.selection
     const { doc, inverse, changed } = applyOps(this.doc, ops)
     this.doc = doc
+    const prev = this.undoStack[this.undoStack.length - 1]
+    if (opts?.mergeKey && prev?.mergeKey === opts.mergeKey) {
+      // Same gesture: fold into the previous entry so one scrub = one undo.
+      // Inverses prepend — undo applies the newest inverse first.
+      const tx = prev.tx
+      tx.ops = [...tx.ops, ...ops]
+      tx.inverse = [...inverse, ...tx.inverse]
+      tx.changed = [...new Set([...tx.changed, ...changed])]
+      tx.at = Date.now()
+      prev.selectionAfter = this.ui.selection
+      this.redoStack = []
+      this.log = this.log.map((l) =>
+        l.id === tx.id ? { ...l, changed: tx.changed, at: tx.at } : l)
+      if (source === 'ai') this.setUi({ aiChanged: changed })
+      this.commit(changed)
+      for (const fn of this.txListeners) fn(tx)
+      return tx
+    }
     const tx: Transaction = { id: genId('tx'), label, source, ops, inverse, changed, at: Date.now() }
-    this.undoStack.push({ tx, selectionBefore, selectionAfter: this.ui.selection })
+    this.undoStack.push({ tx, selectionBefore, selectionAfter: this.ui.selection, mergeKey: opts?.mergeKey })
     if (this.undoStack.length > 500) this.undoStack.shift()
     this.redoStack = []
     this.log = [...this.log.slice(-199), {
