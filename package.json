@@ -1,13 +1,23 @@
 {
   "name": "canvazz",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Local-first, AI-first design editor: a DOM-native canvas with a built-in MCP server",
   "type": "module",
+  "bin": {
+    "canvazz": "bin/canvazz.mjs"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
   "imports": {
     "#/*": "./src/*"
   },
   "scripts": {
     "dev": "vite dev --port 47823",
     "build": "vite build",
+    "start": "node bin/canvazz.mjs",
+    "prepublishOnly": "vite build",
     "preview": "vite preview",
     "generate-routes": "tsr generate",
     "typecheck": "tsc --noEmit",
@@ -20,6 +30,7 @@
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@tailwindcss/browser": "^4.3.0",
     "@tailwindcss/vite": "^4.1.18",
+    "@tanstack/history": "^1.162.0",
     "@tanstack/query-db-collection": "^1.0.40",
     "@tanstack/react-db": "^0.1.86",
     "@tanstack/react-devtools": "latest",
@@ -28,15 +39,19 @@
     "@tanstack/react-router-devtools": "latest",
     "@tanstack/react-router-ssr-query": "latest",
     "@tanstack/react-start": "latest",
+    "@tanstack/router-core": "^1.171.13",
     "@tanstack/router-plugin": "^1.132.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "h3-v2": "npm:h3@2.0.1-rc.20",
     "html-to-image": "^1.11.13",
     "lucide-react": "^0.577.0",
     "radix-ui": "^1.5.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "seroval": "^1.5.4",
     "sf-symbols-lib": "^2.0.1",
+    "srvx": "^0.11.16",
     "tailwind-merge": "^3.0.2",
     "tailwindcss": "^4.1.18",
     "tw-animate-css": "^1.3.6",
