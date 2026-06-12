@@ -13,6 +13,8 @@ interface Pending {
 
 interface Client {
   id: string
+  /** Project open in this editor tab; MCP calls are routed by project. */
+  projectId: string
   send: (event: string, data: string) => void
   close: () => void
 }
@@ -46,17 +48,29 @@ export function bridgeClientCount(): number {
   return clients.length
 }
 
-/** Forward a tool call to the live editor; resolves with its result. */
+/** Project ids with a live editor tab, most recently connected last. */
+export function connectedProjects(): string[] {
+  return [...new Set(clients.map((c) => c.projectId))]
+}
+
+/** Forward a tool call to the editor with that project open. */
 export function dispatchToEditor(
+  projectId: string,
   tool: string,
   args: unknown,
   timeoutMs = 20_000,
 ): Promise<unknown> {
-  const client = clients[clients.length - 1]
+  // Most recent tab wins when the same project is open twice.
+  const client = [...clients].reverse().find((c) => c.projectId === projectId)
   if (!client) {
+    const open = connectedProjects()
     return Promise.reject(
       new Error(
-        'No editor connected. Open the Canvazz editor (default http://localhost:47823) in a browser, then retry.',
+        `No editor tab has project ${projectId} open. ` +
+          (open.length > 0
+            ? `Currently open: ${open.join(', ')}. `
+            : 'No editor tabs are connected. ') +
+          `Open /p/${projectId} in the Canvazz app (default http://localhost:47823), then retry.`,
       ),
     )
   }

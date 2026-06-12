@@ -9,7 +9,7 @@ import type { Page } from '@playwright/test'
 
 let rpcId = 100
 
-async function callTool(page: Page, name: string, args: Record<string, unknown>) {
+async function callToolRaw(page: Page, name: string, args: Record<string, unknown>) {
   const response = await page.request.post('/mcp', {
     data: { jsonrpc: '2.0', id: ++rpcId, method: 'tools/call', params: { name, arguments: args } },
   })
@@ -18,6 +18,17 @@ async function callTool(page: Page, name: string, args: Record<string, unknown>)
     result: { content: Array<{ type: string; text?: string; data?: string }>; isError?: boolean }
   }
   return body.result
+}
+
+function openProjectId(page: Page) {
+  return page.evaluate(
+    () => (window as never as { __canvazz: { projectId: string } }).__canvazz.projectId,
+  )
+}
+
+/** Call a canvas tool against the project open in this page. */
+async function callTool(page: Page, name: string, args: Record<string, unknown>) {
+  return callToolRaw(page, name, { project: await openProjectId(page), ...args })
 }
 
 function textPayload(result: { content: Array<{ type: string; text?: string }> }) {
@@ -29,6 +40,18 @@ test.beforeEach(async ({ page }) => {
   await openEditor(page)
   // Wait for the SSE bridge to connect.
   await expect(page.getByText('MCP live')).toBeVisible({ timeout: 10_000 })
+})
+
+test('tools are project-scoped: list_projects sees the open tab, bad refs fail', async ({ page }) => {
+  const projectId = await openProjectId(page)
+  const listed = textPayload(await callToolRaw(page, 'list_projects', {})) as {
+    projects: Array<{ id: string; open: boolean }>
+  }
+  expect(listed.projects.find((p) => p.id === projectId)?.open).toBe(true)
+
+  const unknown = await callToolRaw(page, 'get_basic_info', { project: 'nope_404' })
+  expect(unknown.isError).toBe(true)
+  expect(unknown.content[0].text).toContain('Unknown project')
 })
 
 test('get_basic_info reflects the live document', async ({ page }) => {

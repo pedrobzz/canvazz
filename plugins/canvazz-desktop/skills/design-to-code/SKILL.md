@@ -9,13 +9,15 @@ Use this skill when the user wants to implement a selected Canvazz artboard, fra
 
 ## Connection
 
-Canvazz must already be running at `http://localhost:47823` with the editor open in a browser tab. The MCP endpoint is `http://localhost:47823/mcp` and the configured MCP server name is `canvazz`.
+Canvazz must already be running at `http://localhost:47823` with the target project open in a browser tab (`/p/<project-id>`). The MCP endpoint is `http://localhost:47823/mcp` and the configured MCP server name is `canvazz`.
 
-Do not start the development server unless the user explicitly asks. If MCP calls fail with no live bridge, tell the user to open Canvazz in the browser and keep the editor tab open.
+Canvazz is multi-project: every canvas tool requires a `project` argument (project id or exact name). Call `list_projects` first to discover ids and see which projects are open in a live editor tab — only open projects can be read.
+
+Do not start the development server unless the user explicitly asks. If MCP calls fail with no live bridge for the project, tell the user to open that project in the browser and keep the tab open.
 
 ## Required Workflow
 
-1. Call `get_basic_info` before any other Canvazz MCP tool.
+1. Call `list_projects` to pick the target project, then `get_basic_info` (with `project`) before any other Canvazz MCP tool.
 2. Determine the implementation target:
    - Use `get_selection` first. If nothing useful is selected, use `get_tree_summary` to find the intended artboard or node.
    - Use `get_children` and `get_node_info` to understand structure without pulling excessive HTML.

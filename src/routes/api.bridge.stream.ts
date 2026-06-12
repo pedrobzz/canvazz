@@ -6,7 +6,11 @@ import { addBridgeClient, removeBridgeClient } from '#/server/bridge'
 export const Route = createFileRoute('/api/bridge/stream')({
   server: {
     handlers: {
-      GET: () => {
+      GET: ({ request }) => {
+        const projectId = new URL(request.url).searchParams.get('project')
+        if (!projectId) {
+          return Response.json({ error: 'project query param is required' }, { status: 400 })
+        }
         const id = `client_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
         const encoder = new TextEncoder()
         let heartbeat: ReturnType<typeof setInterval> | null = null
@@ -18,6 +22,7 @@ export const Route = createFileRoute('/api/bridge/stream')({
             }
             addBridgeClient({
               id,
+              projectId,
               send,
               close: () => controller.close(),
             })

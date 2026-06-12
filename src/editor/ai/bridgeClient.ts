@@ -29,8 +29,8 @@ function setStatus(next: BridgeStatus) {
 let source: EventSource | null = null
 let retryTimer: ReturnType<typeof setTimeout> | null = null
 
-export function startBridge(): () => void {
-  connect()
+export function startBridge(projectId: string): () => void {
+  connect(projectId)
   return () => {
     if (retryTimer) clearTimeout(retryTimer)
     source?.close()
@@ -39,9 +39,9 @@ export function startBridge(): () => void {
   }
 }
 
-function connect() {
+function connect(projectId: string) {
   source?.close()
-  source = new EventSource('/api/bridge/stream')
+  source = new EventSource(`/api/bridge/stream?project=${encodeURIComponent(projectId)}`)
 
   source.addEventListener('open', () => setStatus('connected'))
 
@@ -54,7 +54,7 @@ function connect() {
     source?.close()
     source = null
     if (retryTimer) clearTimeout(retryTimer)
-    retryTimer = setTimeout(connect, 2000)
+    retryTimer = setTimeout(() => connect(projectId), 2000)
   })
 }
 

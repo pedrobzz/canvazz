@@ -47,7 +47,7 @@ function EditorPage() {
     if (state !== 'ready') return
     const stopAutosave = startAutosave(editorStore, projectId)
     const stopThumbnails = startThumbnailCapture(editorStore, projectId)
-    const stopBridge = startBridge()
+    const stopBridge = startBridge(projectId)
     const stopFonts = startFontSync(editorStore)
     return () => {
       stopAutosave()

@@ -9,13 +9,15 @@ Use this skill when the user wants to create, push, or adapt an application scre
 
 ## Connection
 
-Canvazz must already be running at `http://localhost:47823` with the editor open in a browser tab. The MCP endpoint is `http://localhost:47823/mcp` and the configured MCP server name is `canvazz`.
+Canvazz must already be running at `http://localhost:47823` with the target project open in a browser tab (`/p/<project-id>`). The MCP endpoint is `http://localhost:47823/mcp` and the configured MCP server name is `canvazz`.
 
-Do not start the development server unless the user explicitly asks. If MCP calls fail with no live bridge, tell the user to open Canvazz in the browser and keep the editor tab open.
+Canvazz is multi-project: every canvas tool requires a `project` argument (project id or exact name). Call `list_projects` first to discover ids and see which projects are open in a live editor tab — only open projects can be read or edited. Use `create_project` to start a new empty project, then ask the user to open `/p/<id>`.
+
+Do not start the development server unless the user explicitly asks. If MCP calls fail with no live bridge for the project, tell the user to open that project in the browser and keep the tab open.
 
 ## Required Workflow
 
-1. Call `get_basic_info` before any other Canvazz MCP tool.
+1. Call `list_projects` to pick the target project, then `get_basic_info` (with `project`) before any other Canvazz MCP tool.
 2. Read the project's real styling context before designing:
    - CSS, Tailwind configuration, component primitives, theme files, typography, tokens, and existing UI patterns.
    - Prefer repo conventions over generic defaults.
@@ -45,4 +47,4 @@ The Canvazz canvas is DOM-native: layers are sanitized HTML elements styled with
 
 Prefer this operating loop:
 
-`get_basic_info` -> repo style reads -> `create_page`/`create_artboard` -> small `write_html` calls -> targeted edits -> `get_screenshot` -> `finish`.
+`list_projects` -> `get_basic_info` -> repo style reads -> `create_page`/`create_artboard` -> small `write_html` calls -> targeted edits -> `get_screenshot` -> `finish` (all with the same `project`).

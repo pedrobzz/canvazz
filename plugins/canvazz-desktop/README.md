@@ -11,7 +11,9 @@ Canvazz Desktop lets Codex and Claude Code work directly with a live Canvazz can
 
 ## Prerequisites
 
-Canvazz must already be running at `http://localhost:47823`, and the editor must be open in a browser tab. The MCP endpoint forwards tool calls to that live tab over the app's SSE bridge, so the browser is the execution environment.
+Canvazz must already be running at `http://localhost:47823`, and the target project must be open in a browser tab (`/p/<project-id>`). The MCP endpoint forwards tool calls to that project's live tab over the app's SSE bridge, so the browser is the execution environment.
+
+Canvazz is multi-project: every canvas tool takes a required `project` argument (id or exact name). Start with `list_projects` to see what exists and which projects are open; `create_project` adds a new empty one.
 
 Manual MCP connection:
 
