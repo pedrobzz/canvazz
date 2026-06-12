@@ -16,6 +16,7 @@
     "test:all": "vitest run && playwright test"
   },
   "dependencies": {
+    "@libsql/client": "^0.17.3",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@tailwindcss/browser": "^4.3.0",
     "@tailwindcss/vite": "^4.1.18",

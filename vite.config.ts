@@ -13,6 +13,8 @@ const config = defineConfig({
   optimizeDeps: {
     include: ['sf-symbols-lib/dualtone', 'sf-symbols-lib/monochrome'],
   },
+  // Native sqlite bindings can't be bundled; resolve them at runtime.
+  ssr: { external: ['@libsql/client'] },
   plugins: [devtools(), tailwindcss(), tanstackStart(), viteReact()],
 })
 
