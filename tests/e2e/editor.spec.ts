@@ -306,6 +306,9 @@ test('W/H sizing modes: fill is direction-aware, values accept %', async ({ page
   const pickMode = async (axis: 'W' | 'H', mode: string) => {
     await page.locator(`button[aria-label="${axis} sizing mode"]`).click()
     await page.getByRole('menuitem', { name: mode }).click()
+    // Radix unmounts menus async; wait for full close so the next dropdown
+    // click can't land on this menu's exiting items.
+    await expect(page.getByRole('menu')).toHaveCount(0)
   }
 
   // W: Fill in a column parent = stretch on the cross axis, NOT flex-grow.
