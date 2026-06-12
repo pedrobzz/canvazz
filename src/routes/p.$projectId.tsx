@@ -8,6 +8,7 @@ import '#/editor/iconResolver'
 import { startFontSync } from '#/editor/fonts'
 import { editorStore } from '#/editor/store/editorStore'
 import { startAutosave } from '#/editor/store/persistence'
+import { startThumbnailCapture } from '#/editor/thumbnail'
 import { Inspector } from '#/editor/ui/Inspector'
 import { LeftPanel } from '#/editor/ui/LeftPanel'
 import { Toolbar } from '#/editor/ui/Toolbar'
@@ -45,10 +46,12 @@ function EditorPage() {
   useEffect(() => {
     if (state !== 'ready') return
     const stopAutosave = startAutosave(editorStore, projectId)
+    const stopThumbnails = startThumbnailCapture(editorStore, projectId)
     const stopBridge = startBridge()
     const stopFonts = startFontSync(editorStore)
     return () => {
       stopAutosave()
+      stopThumbnails()
       stopBridge()
       stopFonts()
     }
