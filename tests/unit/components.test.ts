@@ -14,9 +14,10 @@ function node(partial: Partial<NodeModel> & Pick<NodeModel, 'id' | 'tag'>): Node
 function fixture(): DocumentModel {
   const doc = emptyDocument('d', 'T')
   doc.nodes = {
-    root: node({ id: 'root', tag: 'div', isComponentRoot: true, children: ['title'] }),
+    cset: node({ id: 'cset', tag: 'div', isComponentSet: true, children: ['root', 'vroot'] }),
+    root: node({ id: 'root', tag: 'div', isComponentRoot: true, parent: 'cset', children: ['title'] }),
     title: node({ id: 'title', tag: 'span', parent: 'root', text: 'Base title' }),
-    vroot: node({ id: 'vroot', tag: 'div', isComponentRoot: true, children: ['vtitle'], refId: 'root' }),
+    vroot: node({ id: 'vroot', tag: 'div', isComponentRoot: true, parent: 'cset', children: ['vtitle'], refId: 'root' }),
     vtitle: node({ id: 'vtitle', tag: 'span', parent: 'vroot', text: 'Variant title', refId: 'title' }),
     inst: node({
       id: 'inst', tag: 'div', componentId: 'cmp',
@@ -27,8 +28,8 @@ function fixture(): DocumentModel {
     cmp: { id: 'cmp', name: 'C', rootId: 'root', setId: 'set' },
     cmpv: { id: 'cmpv', name: 'C / alt', rootId: 'vroot', setId: 'set' },
   }
-  doc.componentSets = { set: { id: 'set', name: 'C', variantIds: ['cmp', 'cmpv'], defaultVariantId: 'cmp' } }
-  doc.pages[0].children = ['root', 'vroot', 'inst']
+  doc.componentSets = { set: { id: 'set', name: 'C', nodeId: 'cset', variantIds: ['cmp', 'cmpv'], defaultVariantId: 'cmp' } }
+  doc.pages[0].children = ['cset', 'inst']
   return doc
 }
 

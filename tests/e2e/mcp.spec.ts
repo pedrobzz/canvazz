@@ -137,14 +137,28 @@ test('component tools: create, instance, override, variant', async ({ page }) =>
     await callTool(page, 'create_variant', { componentId: created.componentId, name: 'dark' }),
   ) as { variantId: string; rootId: string }
   expect(variant.variantId).toBeTruthy()
-  // Variant mains live next to the original on the Design System page.
+  // Variant roots nest inside the component-set frame, which lives on the
+  // Design System page (Figma-style set).
   const variantHome = await page.evaluate((rootId) => {
     const cz = (window as never as {
-      __canvazz: { editorStore: { doc: { pages: Array<{ id: string; children: string[] }> } } }
+      __canvazz: {
+        editorStore: {
+          doc: {
+            pages: Array<{ id: string; children: string[] }>
+            nodes: Record<string, { parent: string | null; isComponentSet?: boolean }>
+          }
+        }
+      }
     }).__canvazz
-    return cz.editorStore.doc.pages.find((p) => p.children.includes(rootId))?.id
+    const doc = cz.editorStore.doc
+    const setId = doc.nodes[rootId]?.parent ?? ''
+    return {
+      isSet: Boolean(doc.nodes[setId]?.isComponentSet),
+      page: doc.pages.find((p) => p.children.includes(setId))?.id,
+    }
   }, variant.rootId)
-  expect(variantHome).toBe('page_design_system')
+  expect(variantHome.isSet).toBe(true)
+  expect(variantHome.page).toBe('page_design_system')
 
   // Switch the instance to the dark variant.
   textPayload(

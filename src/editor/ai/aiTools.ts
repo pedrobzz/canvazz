@@ -130,6 +130,9 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       components: Object.values(store.doc.components).map((c) => ({
         id: c.id, name: c.name, rootId: c.rootId, setId: c.setId, variantProps: c.variantProps,
       })),
+      componentSets: Object.values(store.doc.componentSets).map((s) => ({
+        id: s.id, name: s.name, nodeId: s.nodeId, variantIds: s.variantIds, defaultVariantId: s.defaultVariantId,
+      })),
       tokens: store.doc.tokens,
       selection: store.ui.selection,
       camera: cameraStore.camera,

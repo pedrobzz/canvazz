@@ -42,6 +42,12 @@ export interface NodeModel {
   /** Marks the root node of a main component definition. */
   isComponentRoot?: boolean
   /**
+   * Marks the container node of a component set: its children are the variant
+   * roots (each `isComponentRoot`), laid out and rendered nested like a Figma
+   * component set. Backed by ComponentSetModel.nodeId.
+   */
+  isComponentSet?: boolean
+  /**
    * For variant-clone nodes: the id of the corresponding node in the base
    * definition. Instance overrides are keyed by this canonical id, so they
    * survive variant switches (every variant's "Name" maps to one key).
@@ -76,6 +82,8 @@ export interface ComponentDef {
 export interface ComponentSetModel {
   id: string
   name: string
+  /** The container node whose children are the variant roots. */
+  nodeId: NodeId
   /** Component ids that are variants of this set. */
   variantIds: string[]
   defaultVariantId: string
@@ -165,6 +173,7 @@ export interface NodePropsPatch {
   locked?: boolean
   isArtboard?: boolean
   isComponentRoot?: boolean
+  isComponentSet?: boolean
   componentId?: string | null
   variantId?: string | null
 }

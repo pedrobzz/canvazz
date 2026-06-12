@@ -1,5 +1,8 @@
 import { genId } from '../model/ids'
-import { canonicalSourceId, parsePathId, resolveNode } from '../model/instances'
+import {
+  COMPONENT_SET_PAD, COMPONENT_SET_PAD_TOP, canonicalSourceId, componentSetStyle,
+  parsePathId, resolveNode,
+} from '../model/instances'
 import { px, fmtPx } from '../canvas/geometry'
 import { isLayoutContainer, locate } from '../commands'
 import { sanitizeStyle } from '../compiler/parse'
@@ -168,7 +171,8 @@ export function createVariant(
   const defRoot = def ? store.doc.nodes[def.rootId] : null
   if (!def || !defRoot) return null
 
-  // Clone definition subtree with fresh ids, offset right of the original.
+  // Clone the definition subtree with fresh ids. The clone root flows inside
+  // the set frame, so it carries no absolute placement of its own.
   const cloneIds = new Map<NodeId, NodeId>()
   const cloned: NodeModel[] = []
   const walk = (id: NodeId, parent: NodeId | null): NodeId => {
@@ -190,45 +194,70 @@ export function createVariant(
     copy.children = orig.children.map((c) => walk(c, newId))
     return newId
   }
-  const newRootId = walk(def.rootId, defRoot.parent)
+  const newRootId = walk(def.rootId, null)
   const newRoot = cloned.find((n) => n.id === newRootId)
   if (!newRoot) return null
-  const left = px(defRoot.style.left)
-  const width = px(defRoot.style.width) ?? 100
-  if (left !== null) newRoot.style.left = fmtPx(left + width + 40)
+  stripSetChildPlacement(newRoot.style)
   newRoot.name = `${def.name} / ${variantName}`
 
-  const loc = locate(store, def.rootId)
-  if (!loc) return null
-
   const variantId = genId('cmp')
-  const setId = def.setId ?? genId('set')
   const existingSet = def.setId ? store.doc.componentSets[def.setId] : null
   const baseVariantProps = def.variantProps ?? { variant: 'default' }
+  const ops: Op[] = []
 
-  const ops: Op[] = [
-    { t: 'insertTree', nodes: cloned, rootId: newRootId, at: { ...loc, index: loc.index + 1 } },
-    {
-      t: 'defineComponent',
-      def: { id: variantId, name: newRoot.name, rootId: newRootId, setId, variantProps: { variant: variantName } },
-    },
-  ]
-  if (!existingSet) {
+  if (existingSet) {
+    // Append the new variant as the last child of the existing set frame.
+    const setNode = store.doc.nodes[existingSet.nodeId]
+    if (!setNode) return null
     ops.push(
-      { t: 'defineComponent', def: { ...def, setId, variantProps: baseVariantProps } },
-      {
-        t: 'defineComponentSet',
-        set: { id: setId, name: def.name, variantIds: [componentId, variantId], defaultVariantId: componentId },
-      },
+      { t: 'insertTree', nodes: cloned, rootId: newRootId, at: { kind: 'node', parent: existingSet.nodeId, index: setNode.children.length } },
+      { t: 'defineComponent', def: { id: variantId, name: newRoot.name, rootId: newRootId, setId: existingSet.id, variantProps: { variant: variantName } } },
+      { t: 'defineComponentSet', set: { ...existingSet, variantIds: [...existingSet.variantIds, variantId] } },
     )
   } else {
-    ops.push({
-      t: 'defineComponentSet',
-      set: { ...existingSet, variantIds: [...existingSet.variantIds, variantId] },
-    })
+    // First variant: wrap the lone component into a new set frame, with the
+    // base root and the clone as its stacked children.
+    const loc = locate(store, def.rootId)
+    if (!loc) return null
+    const setId = genId('set')
+    const setNodeId = genId('cset')
+    const baseLeft = px(defRoot.style.left) ?? 0
+    const baseTop = px(defRoot.style.top) ?? 0
+    const setNode: NodeModel = {
+      id: setNodeId,
+      name: def.name,
+      tag: 'div',
+      attrs: {},
+      style: componentSetStyle(baseLeft - COMPONENT_SET_PAD, baseTop - COMPONENT_SET_PAD_TOP),
+      classes: [],
+      children: [],
+      parent: null,
+      visible: true,
+      locked: false,
+      isComponentSet: true,
+    }
+    ops.push(
+      { t: 'insertTree', nodes: [setNode], rootId: setNodeId, at: loc },
+      { t: 'move', id: def.rootId, to: { kind: 'node', parent: setNodeId, index: 0 } },
+      { t: 'setStyle', id: def.rootId, set: { position: null, left: null, top: null } },
+      { t: 'insertTree', nodes: cloned, rootId: newRootId, at: { kind: 'node', parent: setNodeId, index: 1 } },
+      { t: 'defineComponent', def: { ...def, setId, variantProps: baseVariantProps } },
+      { t: 'defineComponent', def: { id: variantId, name: newRoot.name, rootId: newRootId, setId, variantProps: { variant: variantName } } },
+      { t: 'defineComponentSet', set: { id: setId, nodeId: setNodeId, name: def.name, variantIds: [componentId, variantId], defaultVariantId: componentId } },
+    )
   }
+
   store.apply(`Add variant ${variantName}`, ops, src(ctx))
   return { variantId, rootId: newRootId, idMap: Object.fromEntries(cloneIds) }
+}
+
+/** A variant root flows inside the set frame; it owns no absolute placement. */
+function stripSetChildPlacement(style: Record<string, string>): void {
+  delete style.position
+  delete style.left
+  delete style.top
+  delete style.right
+  delete style.bottom
 }
 
 /**
@@ -260,10 +289,12 @@ export function deleteComponent(ctx: Ctx, componentId: string): { ok: true } | {
   if (store.doc.nodes[def.rootId]) ops.push({ t: 'remove', id: def.rootId })
   ops.push({ t: 'removeComponent', id: componentId })
   if (set) {
-    ops.push({
-      t: 'defineComponentSet',
-      set: { ...set, variantIds: set.variantIds.filter((v) => v !== componentId) },
-    })
+    const remaining = set.variantIds.filter((v) => v !== componentId)
+    ops.push({ t: 'defineComponentSet', set: { ...set, variantIds: remaining } })
+    // Last variant gone: drop the now-empty set frame too.
+    if (remaining.length === 0 && store.doc.nodes[set.nodeId]) {
+      ops.push({ t: 'remove', id: set.nodeId })
+    }
   }
   store.apply(`Delete component ${def.name}`, ops, src(ctx))
   return { ok: true }

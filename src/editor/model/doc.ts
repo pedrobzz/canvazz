@@ -297,7 +297,8 @@ export function emptyDocument(id: string, name: string): DocumentModel {
   return {
     id,
     name,
-    schemaVersion: 1,
+    // Keep in sync with SCHEMA_VERSION in migrate.ts.
+    schemaVersion: 2,
     pages: [{ id: pageId, name: 'Page 1', children: [] }],
     activePageId: pageId,
     nodes: {},

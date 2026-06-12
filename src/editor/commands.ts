@@ -354,6 +354,8 @@ export function isSvgNode(node: NodeModel): boolean {
  */
 export function canReceiveChildren(node: NodeModel): boolean {
   if (node.componentId || node.text !== undefined || NEVER_CONTAINERS.has(node.tag)) return false
+  // A set frame holds only variant roots, added via createVariant — not drops.
+  if (node.isComponentSet) return false
   if (SVG_TAGS.has(node.tag)) return false // vectors edit as a unit
   if (node.isArtboard || node.children.length > 0) return true
   return isLayoutContainer(node)

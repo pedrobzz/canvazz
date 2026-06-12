@@ -50,6 +50,35 @@ export function stripPlacement(style: Record<string, string>): Record<string, st
 }
 
 /**
+ * Component-set container geometry. A set is a real flex-column frame whose
+ * children are the variant roots; flexbox stacks them and `fit-content` sizes
+ * the frame, so adding/removing variants reflows with no manual layout math.
+ * The top padding leaves room for the Figma-style set label.
+ */
+export const COMPONENT_SET_PAD = 24
+export const COMPONENT_SET_PAD_TOP = 48
+export const COMPONENT_SET_GAP = 40
+
+/** Inline style that makes a node read and lay out as a component set. */
+export function componentSetStyle(left: number, top: number): Record<string, string> {
+  const u = (n: number) => `${Math.round(n * 100) / 100}px`
+  return {
+    position: 'absolute',
+    left: u(left),
+    top: u(top),
+    display: 'flex',
+    'flex-direction': 'column',
+    'align-items': 'flex-start',
+    gap: u(COMPONENT_SET_GAP),
+    padding: `${COMPONENT_SET_PAD_TOP}px ${COMPONENT_SET_PAD}px ${COMPONENT_SET_PAD}px`,
+    width: 'fit-content',
+    border: '1px dashed #8b5cf6',
+    'border-radius': '8px',
+    'background-color': 'rgba(139, 92, 246, 0.05)',
+  }
+}
+
+/**
  * Canonical override key for a definition node: variant clones resolve to
  * their base-definition counterpart via refId.
  */

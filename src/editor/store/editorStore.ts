@@ -1,4 +1,5 @@
 import { applyOps, emptyDocument } from '../model/doc'
+import { migrateDocument } from '../model/migrate'
 import { genId } from '../model/ids'
 import type { DocumentModel, NodeId, Op, Transaction, TransactionSource } from '../model/types'
 
@@ -160,15 +161,16 @@ export class EditorStore {
 
   /** Replace the whole document (load from disk, import). Clears history. */
   replaceDocument(doc: DocumentModel) {
-    // Normalize documents saved before newer model fields existed.
-    this.doc = {
+    // Normalize documents saved before newer model fields existed, then run
+    // forward migrations (e.g. v1→v2 wraps component sets into real frames).
+    this.doc = migrateDocument({
       ...doc,
       tokens: doc.tokens ?? {},
       fonts: doc.fonts ?? {},
       assets: doc.assets ?? {},
       componentSets: doc.componentSets ?? {},
       comments: doc.comments ?? [],
-    }
+    })
     this.undoStack = []
     this.redoStack = []
     this.setUi({ selection: [], hoverId: null, editingTextId: null, aiChanged: [] })

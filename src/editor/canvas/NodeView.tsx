@@ -45,13 +45,15 @@ interface RenderParts {
   text?: string
   visible: boolean
   isArtboard?: boolean
+  isComponentSet?: boolean
 }
 
 function buildProps(parts: RenderParts): Record<string, unknown> {
   const style = styleToReact(parts.style) as CSSProperties & Record<string, string>
   if (!parts.visible) style.display = 'none'
-  if (parts.isArtboard) {
-    // Isolate artboard layout/paint from the rest of the world.
+  if (parts.isArtboard || parts.isComponentSet) {
+    // Isolate artboard / component-set layout/paint from the rest of the world.
+    // `layout style` (not `size`) keeps the set's fit-content sizing intact.
     style.contain = 'layout style'
   }
   const props: Record<string, unknown> = {
@@ -93,15 +95,37 @@ export const NodeView = memo(function NodeView({ id }: { id: NodeId }) {
 
   const props = buildProps({
     tag: node.tag, pathId: node.id, attrs: node.attrs, style: node.style,
-    classes: node.classes, text: node.text, visible: node.visible, isArtboard: node.isArtboard,
+    classes: node.classes, text: node.text, visible: node.visible,
+    isArtboard: node.isArtboard, isComponentSet: node.isComponentSet,
   })
   if (VOID_TAGS.has(node.tag)) return createElement(node.tag, { key: id, ...props })
-  const children: ReactNode =
+  let children: ReactNode =
     node.children.length > 0
       ? node.children.map((c) => <NodeView key={c} id={c} />)
       : node.text ?? null
+  // Figma-style set label: render-only chrome (no model node, no data-node-id),
+  // so it sits above the variants without touching geometry, layout, or export.
+  if (node.isComponentSet) {
+    children = [<SetLabel key="__cz_set_label" name={node.name} />, children]
+  }
   return createElement(node.tag, { key: id, ...props }, children)
 })
+
+/** The component-set name, floated in the frame's header padding zone. */
+function SetLabel({ name }: { name: string }) {
+  return (
+    <span
+      data-canvas-chrome=""
+      style={{
+        position: 'absolute', top: '16px', left: '24px',
+        fontSize: '12px', fontWeight: 600, color: '#8b5cf6',
+        pointerEvents: 'none', userSelect: 'none', whiteSpace: 'nowrap',
+      }}
+    >
+      {name}
+    </span>
+  )
+}
 
 /** In-place text editing: the actual element becomes contentEditable. */
 function EditableText({ node }: { node: NodeModel }) {
