@@ -122,6 +122,21 @@ server.registerTool('get_screenshot', {
   inputSchema: { id: z.string().optional().describe('Node/artboard id; default first artboard') },
 }, forward('get_screenshot', 45_000))
 
+server.registerTool('insert_icon', {
+  title: 'Insert an SF Symbol icon',
+  description:
+    'Place one of 7,007 Apple SF Symbols on the canvas as editable vector nodes. Address by Apple name ("heart.fill", "pills.fill", "wind", "lungs"). Color via the color arg or restyle later (CSS color / currentColor).',
+  inputSchema: {
+    name: z.string().min(1).describe('SF Symbol name, e.g. "cross.case.fill"'),
+    variant: z.enum(['monochrome', 'dualtone']).optional().describe('Default monochrome'),
+    size: z.number().optional().describe('Pixel size, default 24'),
+    targetId: z.string().optional().describe('Container node; default page level'),
+    x: z.number().optional(), y: z.number().optional(),
+    color: z.string().optional().describe('CSS color for the glyph'),
+    index: z.number().int().optional(),
+  },
+}, forward('insert_icon', 30_000))
+
 server.registerTool('create_page', {
   title: 'Create a page',
   description: 'Add a new page to the document and switch to it.',

@@ -22,6 +22,16 @@ const REACT_ATTR: Record<string, string> = {
   for: 'htmlFor', maxlength: 'maxLength', readonly: 'readOnly',
   colspan: 'colSpan', rowspan: 'rowSpan', tabindex: 'tabIndex',
   autocomplete: 'autoComplete', srcset: 'srcSet',
+  // SVG presentation attributes React knows only in camelCase.
+  'fill-opacity': 'fillOpacity', 'fill-rule': 'fillRule', 'clip-rule': 'clipRule',
+  'stroke-width': 'strokeWidth', 'stroke-linecap': 'strokeLinecap',
+  'stroke-linejoin': 'strokeLinejoin', 'stroke-dasharray': 'strokeDasharray',
+  'stroke-dashoffset': 'strokeDashoffset', 'stroke-opacity': 'strokeOpacity',
+  'stop-color': 'stopColor', 'stop-opacity': 'stopOpacity',
+  'vector-effect': 'vectorEffect', 'text-anchor': 'textAnchor',
+  'dominant-baseline': 'dominantBaseline', 'letter-spacing': 'letterSpacing',
+  'font-size': 'fontSize', 'font-family': 'fontFamily', 'font-weight': 'fontWeight',
+  'transform-origin': 'transformOrigin',
 }
 
 interface RenderParts {

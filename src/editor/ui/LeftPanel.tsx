@@ -4,7 +4,9 @@ import { toPickerHex } from './fields'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cameraStore } from '../canvas/camera'
 import { createInstance } from '../components/componentCommands'
+import { SFSymbol, sfSymbolMarkup } from '@/components/SFSymbol'
 import { DEFAULT_WEIGHTS, isValidFamily, verifyFontLoaded } from '../fonts'
+import { insertHtml } from '../commands'
 import { genId } from '../model/ids'
 import { editorStore } from '../store/editorStore'
 import { useDocVersion } from '../store/hooks'
@@ -38,6 +40,7 @@ export function LeftPanel() {
         <TabsContent value="components" className="min-h-0 flex-1 overflow-y-auto">
           <ColorsSection />
           <FontsSection />
+          <IconsSection />
           <ComponentList />
         </TabsContent>
         <TabsContent value="log" className="min-h-0 flex-1 overflow-y-auto">
@@ -295,6 +298,87 @@ function FontsSection() {
           ))}
         </ul>
       )}
+    </div>
+  )
+}
+
+/**
+ * SF Symbols by free-text Apple name ("heart.fill"). Inserting renders the
+ * symbol to static SVG and lands it on the canvas as ordinary sanitized
+ * model nodes — recolorable, resizable, exportable like anything else.
+ */
+function IconsSection() {
+  const [name, setName] = useState('heart.fill')
+  const [variant, setVariant] = useState<'monochrome' | 'dualtone'>('monochrome')
+
+  const insert = async () => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const page = editorStore.activePage()
+    const artboard = page.children.find((id) => editorStore.doc.nodes[id]?.isArtboard)
+    const viewport = document.querySelector('[data-canvas]')
+    const v = viewport?.getBoundingClientRect()
+    const center = v ? cameraStore.screenToWorld(v.width / 2, v.height / 2) : { x: 0, y: 0 }
+    const origin = artboard
+      ? {
+          x: center.x - (parseFloat(editorStore.doc.nodes[artboard].style.left ?? '0') || 0),
+          y: center.y - (parseFloat(editorStore.doc.nodes[artboard].style.top ?? '0') || 0),
+        }
+      : center
+    const markup = await sfSymbolMarkup(trimmed, {
+      variant,
+      size: 48,
+      style: {
+        position: 'absolute',
+        left: `${Math.round(origin.x - 24)}px`,
+        top: `${Math.round(origin.y - 24)}px`,
+        color: '#111111',
+      },
+    })
+    if (!markup) return
+    const at = artboard
+      ? ({ kind: 'node', parent: artboard, index: editorStore.doc.nodes[artboard].children.length } as const)
+      : ({ kind: 'page', pageId: page.id, index: page.children.length } as const)
+    const { rootIds } = insertHtml({ store: editorStore }, markup, at, `Insert icon ${trimmed}`)
+    if (rootIds.length > 0) editorStore.setSelection(rootIds)
+  }
+
+  return (
+    <div className="border-b border-[var(--cz-panel-border)] pb-2" data-testid="icons">
+      <div className="px-3 py-1.5 text-[11px] font-semibold text-[var(--cz-panel-fg)]">Icons</div>
+      <div className="flex items-center gap-1.5 px-3">
+        <input
+          value={name}
+          placeholder="SF Symbol name, e.g. heart.fill"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Enter') void insert()
+          }}
+        />
+        <span
+          className="flex size-7 shrink-0 items-center justify-center rounded bg-[var(--cz-panel-hover)] text-[var(--cz-panel-fg)]"
+          title="Preview"
+        >
+          <SFSymbol name={name.trim() || 'questionmark'} variant={variant} size={16} />
+        </span>
+      </div>
+      <div className="flex items-center gap-1.5 px-3 pt-1.5">
+        <select
+          aria-label="Icon variant"
+          value={variant}
+          onChange={(e) => setVariant(e.target.value as 'monochrome' | 'dualtone')}
+        >
+          <option value="monochrome">Monochrome</option>
+          <option value="dualtone">Dualtone</option>
+        </select>
+        <button
+          className="shrink-0 rounded bg-[var(--cz-panel-hover)] px-2 py-1 text-[11px] hover:bg-[var(--cz-panel-active)] hover:text-white"
+          onClick={() => void insert()}
+        >
+          Insert
+        </button>
+      </div>
     </div>
   )
 }

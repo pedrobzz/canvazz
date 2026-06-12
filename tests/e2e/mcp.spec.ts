@@ -268,3 +268,31 @@ test('add_font loads a Google family usable in styles', async ({ page }) => {
   }
   expect(Object.keys(fonts.documentFonts)).toContain('Space Grotesk')
 })
+
+test('insert_icon places SF Symbols as editable vectors', async ({ page }) => {
+  const result = textPayload(
+    await callTool(page, 'insert_icon', {
+      name: 'heart.fill', targetId: 'artboard-1', x: 30, y: 560, size: 48, color: '#FF453A',
+    }),
+  ) as { ok: boolean; changedIds: string[]; symbol: string }
+  expect(result.ok).toBe(true)
+  expect(result.symbol).toBe('heart.fill')
+  const id = result.changedIds[0]
+
+  const info = await page.evaluate((nodeId) => {
+    const el = document.querySelector(`[data-node-id="${nodeId}"]`)
+    return {
+      isSvg: el instanceof SVGSVGElement,
+      hasPath: !!el?.querySelector('path[d]'),
+      color: el ? getComputedStyle(el).color : null,
+    }
+  }, id)
+  expect(info.isSvg).toBe(true)
+  expect(info.hasPath).toBe(true)
+  expect(info.color).toBe('rgb(255, 69, 58)')
+
+  // Unknown symbols error helpfully instead of inserting nothing.
+  const bad = await callTool(page, 'insert_icon', { name: 'definitely.not.real' })
+  expect(bad.isError).toBe(true)
+  expect(bad.content[0].text).toContain('Unknown SF Symbol')
+})

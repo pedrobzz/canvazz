@@ -12,6 +12,7 @@ import {
   createInstance, createMainComponent, createVariant, detachInstance,
   setInstanceOverride, setInstanceVariant,
 } from '../components/componentCommands'
+import { sfSymbolMarkup } from '@/components/SFSymbol'
 import { DEFAULT_WEIGHTS, isValidFamily, syncDocumentFonts, verifyFontLoaded } from '../fonts'
 import { genId } from '../model/ids'
 import { createArtboard } from '../model/factory'
@@ -460,6 +461,31 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       if (!ok) throw new Error(`Failed to apply override for ${sourceId}`)
     }
     return mutationResult('set_instance_overrides', [instanceId])
+  },
+
+  async insert_icon(args) {
+    const name = String(args.name ?? '').trim()
+    if (!name) throw new Error('name is required (Apple SF Symbol name, e.g. "heart.fill")')
+    const variant = args.variant === 'dualtone' ? 'dualtone' : 'monochrome'
+    const size = Math.max(8, Math.min(512, Number(args.size) || 24))
+    const style: Record<string, string> = {}
+    if (args.x !== undefined || args.y !== undefined) {
+      style.position = 'absolute'
+      style.left = `${Number(args.x) || 0}px`
+      style.top = `${Number(args.y) || 0}px`
+    }
+    if (args.color) style.color = String(args.color)
+    const markup = await sfSymbolMarkup(name, { variant, size, style })
+    if (!markup) {
+      throw new Error(
+        `Unknown SF Symbol: "${name}". Use Apple names like "heart.fill", "pills.fill", "cross.case", "lungs.fill".`,
+      )
+    }
+    const at = locationFor(args.targetId as string | undefined, args.index as number | undefined)
+    const { rootIds, dropped } = insertHtml({ ...AI }, markup, at, `AI: insert icon ${name}`)
+    if (rootIds.length === 0) throw new Error(`Icon markup rejected: ${dropped.join(', ')}`)
+    store.setSelection(rootIds)
+    return { ...mutationResult('insert_icon', rootIds), symbol: name, dropped }
   },
 
   create_page(args) {

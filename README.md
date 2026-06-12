@@ -125,6 +125,11 @@ CSS custom properties on the canvas root: define once in the Assets ▸ Colors p
 apply anywhere via the ◇ picker (`var(--name)`), and one edit recolors every usage.
 Exports embed the tokens so the generated HTML/JSX stands alone.
 
+**Icons**: all 7,007 Apple SF Symbols are available by free-text name — `<Icon
+name="heart.fill" />` in app code (`src/components/Icon.tsx` / `SFSymbol.tsx`), the Assets ▸
+Icons panel, or the `insert_icon` MCP tool. Inserted icons land on the canvas as ordinary
+sanitized SVG nodes: recolorable (`currentColor`), resizable, exportable.
+
 **Fonts** are document assets: add a Google family in Assets ▸ Fonts (or via MCP `add_font`)
 and it loads as a stylesheet, shows in the typography inspector, and persists with the file.
 
@@ -137,7 +142,7 @@ Context first → incremental visible writes → exact reads → targeted edits 
   `get_screenshot` (PNG of any artboard/node), `get_fonts`.
 - **Writes:** `create_artboard`, `write_html` (insert/before/after/replace, HTML + SVG subset),
   `update_styles`, `set_classes`, `set_text_content`, `move_nodes`, `duplicate_nodes`,
-  `delete_nodes`, `rename_nodes`, `set_tokens`, `add_font`.
+  `delete_nodes`, `rename_nodes`, `set_tokens`, `add_font`, `insert_icon` (SF Symbols).
 - **Pages:** `create_page`, `open_page`.
 - **Components:** `create_component`, `create_instance`, `create_variant`,
   `set_instance_overrides`, `detach_instance`.
