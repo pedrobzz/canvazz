@@ -1,5 +1,8 @@
 import { useState, useSyncExternalStore } from 'react'
 import { Check, Component, File, Layers, Plus, ScrollText, Sparkles, User } from 'lucide-react'
+import {
+  ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 import { toPickerHex } from './fields'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cameraStore } from '../canvas/camera'
@@ -78,43 +81,70 @@ function PagesSection() {
           const active = page.id === doc.activePageId
           return (
             <li key={page.id}>
-              <div
-                role="button"
-                tabIndex={0}
-                className={`flex w-full cursor-default items-center gap-2 px-3 py-1 text-[11.5px] ${
-                  active ? 'text-white' : 'text-[var(--cz-panel-fg)] hover:bg-[var(--cz-panel-hover)]'
-                }`}
-                onClick={() => editorStore.setActivePage(page.id)}
-                onDoubleClick={() => setRenaming(page.id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') editorStore.setActivePage(page.id)
-                }}
-              >
-                <File className="size-3 shrink-0 text-[var(--cz-panel-muted)]" />
-                {renaming === page.id ? (
-                  <input
-                    autoFocus
-                    defaultValue={page.name}
-                    className="h-5 flex-1"
-                    onClick={(e) => e.stopPropagation()}
-                    onBlur={(e) => {
-                      const name = e.target.value.trim()
-                      if (name && name !== page.name) {
-                        editorStore.apply('Rename page', [{ t: 'setPageName', id: page.id, name }])
-                      }
-                      setRenaming(null)
-                    }}
+              <ContextMenu>
+                <ContextMenuTrigger asChild>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className={`mx-1 flex cursor-default items-center gap-2 rounded-md px-2 py-1 text-[11.5px] ${
+                      active
+                        ? 'bg-[var(--cz-accent)]/20 text-white'
+                        : 'text-[var(--cz-panel-fg)] hover:bg-[var(--cz-panel-hover)]'
+                    }`}
+                    onClick={() => editorStore.setActivePage(page.id)}
+                    onDoubleClick={() => setRenaming(page.id)}
                     onKeyDown={(e) => {
-                      e.stopPropagation()
-                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                      if (e.key === 'Escape') setRenaming(null)
+                      if (e.key === 'Enter') editorStore.setActivePage(page.id)
                     }}
-                  />
-                ) : (
-                  <span className="truncate">{page.name}</span>
-                )}
-                {active ? <Check className="ml-auto size-3 shrink-0 text-[var(--cz-accent)]" /> : null}
-              </div>
+                  >
+                    <File className="size-3 shrink-0 text-[var(--cz-panel-muted)]" />
+                    {renaming === page.id ? (
+                      <input
+                        autoFocus
+                        defaultValue={page.name}
+                        className="h-5 flex-1"
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={(e) => {
+                          const name = e.target.value.trim()
+                          if (name && name !== page.name) {
+                            editorStore.apply('Rename page', [{ t: 'setPageName', id: page.id, name }])
+                          }
+                          setRenaming(null)
+                        }}
+                        onKeyDown={(e) => {
+                          e.stopPropagation()
+                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                          if (e.key === 'Escape') setRenaming(null)
+                        }}
+                      />
+                    ) : (
+                      <span className="truncate">{page.name}</span>
+                    )}
+                    {active ? <Check className="ml-auto size-3 shrink-0 text-[var(--cz-accent)]" /> : null}
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuItem onSelect={() => editorStore.setActivePage(page.id)}>
+                    Open page
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={() => setRenaming(page.id)}>Rename</ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    variant="destructive"
+                    disabled={doc.pages.length <= 1}
+                    onSelect={() => {
+                      // removePage requires an empty page: clear it first, in
+                      // the same undoable transaction.
+                      editorStore.apply('Delete page', [
+                        ...page.children.map((id) => ({ t: 'remove' as const, id })),
+                        { t: 'removePage' as const, id: page.id },
+                      ])
+                    }}
+                  >
+                    Delete page
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
             </li>
           )
         })}

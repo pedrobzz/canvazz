@@ -12,6 +12,7 @@ import {
   isSvgNode, isTextNode, nudgeNodes, pasteHtml, reorderNodes, topMostOnly,
   ungroupNodes,
 } from '../commands'
+import { clipboard, setClipboard } from '../clipboard'
 import { parsePathId } from '../model/instances'
 import type { Overlay } from './overlay'
 import type { Rect, SnapGuide } from './geometry'
@@ -786,22 +787,20 @@ export class InteractionController {
         case 'c':
           if (sel.length > 0) {
             e.preventDefault()
-            this.clipboard = copyNodes(ctx, sel.map((s) => parsePathId(s).sourceId))
-            void navigator.clipboard?.writeText(this.clipboard).catch(() => {})
+            setClipboard(copyNodes(ctx, sel.map((s) => parsePathId(s).sourceId)))
           }
           return
         case 'x':
           if (sel.length > 0) {
             e.preventDefault()
-            this.clipboard = copyNodes(ctx, sel.map((s) => parsePathId(s).sourceId))
-            void navigator.clipboard?.writeText(this.clipboard).catch(() => {})
+            setClipboard(copyNodes(ctx, sel.map((s) => parsePathId(s).sourceId)))
             deleteNodes(ctx, sel.map((s) => parsePathId(s).sourceId))
           }
           return
         case 'v':
-          if (this.clipboard) {
+          if (clipboard.html) {
             e.preventDefault()
-            pasteHtml(ctx, this.clipboard)
+            pasteHtml(ctx, clipboard.html)
           }
           return
         case ']':
@@ -872,8 +871,6 @@ export class InteractionController {
   }
 
   // --- Helpers -------------------------------------------------------------
-
-  private clipboard = ''
 
   private nextArtboardName(): string {
     const page = this.store.activePage()
