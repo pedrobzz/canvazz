@@ -6,9 +6,17 @@ An AI-first, DOM-native design editor in the spirit of [Paper](https://paper.des
 layout engine. Design and code are the same artifact, so they round-trip without translation
 loss.
 
-Stack: React 19 · TanStack Start · TypeScript (strict) · Tailwind CSS v4 · shadcn/ui.
-Local-first (IndexedDB autosave), no backend required. Convex is intentionally not used —
-it becomes relevant only if shared projects/multiplayer are added (see *Collaboration*).
+Stack: React 19 · TanStack Start · TanStack DB · TypeScript (strict) · Tailwind CSS v4 ·
+shadcn/ui. Local-first: projects persist to an embedded libSQL (SQLite) file at
+`~/.canvazz/database.db` (`CANVAZZ_DB` overrides) — no database to host, no backend beyond
+the app's own server functions. Convex is intentionally not used — it becomes relevant only
+if shared projects/multiplayer are added (see *Collaboration*).
+
+**Multi-project:** `/` is the Files page (grid/list, search ⌘F, recents, thumbnails captured
+from the live canvas on save); each project opens at `/p/<id>` with its own pages, components,
+and design system. Project metadata syncs through a TanStack DB collection (optimistic
+rename/delete over server functions); the editor's transactional op store saves the open
+document (debounced) through the same server functions.
 
 ## Run it
 
@@ -17,15 +25,23 @@ bun install
 bun run dev          # http://localhost:47823
 ```
 
+Or run the packaged CLI (builds to `dist/`, serves it, opens the browser):
+
+```sh
+bun run build
+npx canvazz          # or: node bin/canvazz.mjs [--port 47823] [--db path] [--no-open]
+```
+
 Connect an AI agent over MCP (Claude Code example):
 
 ```sh
 claude mcp add --transport http canvazz http://localhost:47823/mcp
 ```
 
-Keep the editor open in a browser — the MCP server forwards tool calls to the live tab over
-SSE, so you watch the AI design in real time. Edits pulse purple on canvas, land in the
-**Log** tab, and are undoable like any user edit.
+Every canvas tool takes a required `project` argument (id or unique name) — agents start with
+`list_projects`. Keep the target project open in a browser tab — the MCP server forwards tool
+calls to that project's live tab over SSE, so you watch the AI design in real time. Edits
+pulse purple on canvas, land in the **Log** tab, and are undoable like any user edit.
 
 ```sh
 bun run test         # unit: ops, sanitizer, round-trip (vitest + jsdom)
@@ -52,7 +68,8 @@ src/editor/
                   via data-cz-id / data-cz-name
   store/        External state (outside React)
     editorStore.ts per-node subscriptions, history, selection, command log
-    persistence.ts IndexedDB autosave (debounced) + restore
+    persistence.ts debounced autosave via server functions + legacy import
+  thumbnail.ts  captures a small JPEG of the first artboard after edits settle
   canvas/       The infinite canvas
     camera.ts     pan/zoom store; subscribers write transforms directly to DOM
     NodeView.tsx  model → live DOM; one React component per node
@@ -66,10 +83,17 @@ src/editor/
     aiTools.ts    tool executors (all mutations: transactional, source 'ai')
     bridgeClient.ts SSE bridge client
   commands.ts   Shared command layer (humans and AI both go through it)
-src/server/bridge.ts        MCP→editor dispatch queue (SSE, in-memory)
-src/routes/mcp.ts           MCP server: 27 tools, zod-validated
-src/routes/api.bridge.*.ts  SSE stream + result callback
+src/server/db.ts            embedded libSQL handle (~/.canvazz/database.db)
+src/server/projects.ts      project store queries (server-only)
+src/server/projectFns.ts    server functions: list/get/create/save/rename/...
+src/server/bridge.ts        MCP→editor dispatch queue (SSE, per-project routing)
+src/lib/projectsCollection.ts TanStack DB collection over project metadata
+src/routes/index.tsx        Files page (grid/list, search, thumbnails, rename)
+src/routes/p.$projectId.tsx the editor, one project per route
+src/routes/mcp.ts           MCP server: 29 tools, zod-validated, project-scoped
+src/routes/api.bridge.*.ts  SSE stream (?project=) + result callback
 src/routes/perf.tsx         /perf?n=1000 — perf harness document generator
+bin/canvazz.mjs             npm CLI: serves dist/ (srvx) — npx canvazz
 ```
 
 ### The core invariants
@@ -142,9 +166,12 @@ and it loads as a stylesheet, shows in the typography inspector, and persists wi
 
 ### MCP contract (Paper-style)
 
-Context first → incremental visible writes → exact reads → targeted edits → explicit finish:
+Pick a project → context first → incremental visible writes → exact reads → targeted edits →
+explicit finish. Every canvas tool requires `project` (id or unique name):
 
-- **Reads:** `get_basic_info` (always first), `get_selection`, `get_tree_summary`,
+- **Projects:** `list_projects` (always first — shows which projects are open in a live
+  editor tab), `create_project` (new empty project, headless).
+- **Reads:** `get_basic_info` (before editing a project), `get_selection`, `get_tree_summary`,
   `get_children`, `get_node_info`, `get_html`, `get_jsx`, `get_computed_styles`,
   `get_screenshot` (PNG of any artboard/node), `get_fonts`.
 - **Writes:** `create_artboard`, `write_html` (insert/before/after/replace, HTML + SVG subset),
