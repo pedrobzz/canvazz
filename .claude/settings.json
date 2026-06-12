@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat /Users/pedrooscar/personal/healthfactor/plugins/pedrobzz-plugins/skills/commit/SKILL.md /Users/pedrooscar/personal/healthfactor/plugins/pedrobzz-plugins/skills/commit/references/scope-rules.md)",
+      "Read(//Users/pedrooscar/personal/healthfactor/plugins/pedrobzz-plugins/skills/commit/**)",
+      "Bash(git -C /Users/pedrooscar/personal/canvazz diff --stat)",
+      "Bash(git -C /Users/pedrooscar/personal/canvazz status --porcelain)",
+      "Bash(git -C /Users/pedrooscar/personal/canvazz log --oneline -5)"
+    ]
+  }
+}
