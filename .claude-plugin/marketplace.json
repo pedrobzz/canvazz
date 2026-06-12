@@ -1,0 +1,17 @@
+{
+  "name": "canvazz-local",
+  "owner": {
+    "name": "Canvazz"
+  },
+  "metadata": {
+    "description": "Local Canvazz plugin marketplace for the integrated app MCP.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "canvazz-desktop",
+      "source": "./plugins/canvazz-desktop",
+      "description": "Connect to Canvazz using the app's integrated MCP server."
+    }
+  ]
+}
