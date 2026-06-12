@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { Link } from '@tanstack/react-router'
 import { Cable } from 'lucide-react'
 import { editorStore } from '../store/editorStore'
 import { useDocVersion } from '../store/hooks'
@@ -20,19 +21,22 @@ export function TopBar() {
       data-cz-ui
       className="cz-panel flex h-10 shrink-0 items-center gap-3 border-b border-[var(--cz-panel-border)] px-3"
     >
-      <span className="text-[13px] font-bold tracking-tight text-white">canvazz</span>
+      <Link
+        to="/"
+        className="text-[13px] font-bold tracking-tight text-white hover:text-[var(--cz-accent)]"
+        title="Back to files"
+      >
+        canvazz
+      </Link>
       <div className="h-4 w-px bg-[var(--cz-panel-border)]" />
       <div className="w-48">
         <TextField
           value={editorStore.doc.name}
-          onCommit={(name) => {
-            editorStore.doc = { ...editorStore.doc, name }
-            editorStore.setUi({})
-          }}
+          onCommit={(name) => editorStore.setDocName(name)}
         />
       </div>
       <span className="text-[10px] text-[var(--cz-panel-muted)]" data-testid="save-state">
-        {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved locally' : saveState === 'error' ? 'Save failed' : ''}
+        {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Save failed' : ''}
       </span>
       <div className="ml-auto flex items-center gap-2">
         <span

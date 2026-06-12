@@ -236,6 +236,14 @@ export class EditorStore {
     if (this.ui.tool !== tool) this.setUi({ tool })
   }
 
+  /** Rename the document. Not undoable; reaches persistence via doc listeners. */
+  setDocName(name: string) {
+    if (this.doc.name === name) return
+    this.doc = { ...this.doc, name }
+    this.docVersion++
+    for (const fn of this.docListeners) fn()
+  }
+
   /** Switch the visible page. Not undoable — it's view state, like camera. */
   setActivePage(id: string) {
     if (this.doc.activePageId === id || !this.doc.pages.some((p) => p.id === id)) return

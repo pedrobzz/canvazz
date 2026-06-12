@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
@@ -17,6 +19,8 @@ export default defineConfig({
   },
   webServer: {
     command: 'bunx vite dev --port 3100',
+    // Throwaway project store; never the real ~/.canvazz database.
+    env: { CANVAZZ_DB: join(tmpdir(), `canvazz-e2e-${Date.now()}.db`) },
     port: 3100,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,

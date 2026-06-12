@@ -219,8 +219,8 @@ test('autosave persists across reload', async ({ page }) => {
   await page.mouse.click(card.x, card.y)
   await dragBy(page, card, 80, 0)
   const moved = await nodeStyle(page, 'card-1', 'left')
-  await expect(page.locator('[data-testid="save-state"]')).toHaveText('Saved locally')
-  await page.goto('/') // no ?fresh — load from IndexedDB
+  await expect(page.locator('[data-testid="save-state"]')).toHaveText('Saved')
+  await page.reload() // load the same project back from the libsql store
   await expect(page.locator('[data-node-id="card-1"]')).toBeVisible()
   expect(await nodeStyle(page, 'card-1', 'left')).toBe(moved)
 })

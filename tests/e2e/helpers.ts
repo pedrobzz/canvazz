@@ -1,9 +1,10 @@
 import { expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
-/** Load the editor with the deterministic seed document. */
+/** Create a fresh project (deterministic seed document) and open the editor. */
 export async function openEditor(page: Page) {
-  await page.goto('/?fresh=1')
+  await page.goto('/')
+  await page.getByRole('button', { name: 'New file' }).click()
   await expect(page.locator('[data-node-id="artboard-1"]')).toBeVisible()
   // Initial zoom-to-fit settles camera; wait for the world transform to apply.
   await page.waitForTimeout(120)

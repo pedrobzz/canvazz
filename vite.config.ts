@@ -8,10 +8,16 @@ import tailwindcss from '@tailwindcss/vite'
 
 const config = defineConfig({
   resolve: { tsconfigPaths: true },
-  // Prebundle the 7k-icon SF Symbols barrels at server start so their first
-  // use doesn't trigger a mid-session optimize-and-reload.
+  // Prebundle heavy/lazy-route deps at server start so their first use
+  // doesn't trigger a mid-session optimize-and-reload.
   optimizeDeps: {
-    include: ['sf-symbols-lib/dualtone', 'sf-symbols-lib/monochrome'],
+    include: [
+      'sf-symbols-lib/dualtone',
+      'sf-symbols-lib/monochrome',
+      '@tanstack/react-db',
+      '@tanstack/query-db-collection',
+      '@tanstack/react-query',
+    ],
   },
   // Native sqlite bindings can't be bundled; resolve them at runtime.
   ssr: { external: ['@libsql/client'] },

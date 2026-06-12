@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as PerfRouteImport } from './routes/perf'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PProjectIdRouteImport } from './routes/p.$projectId'
 import { Route as ApiBridgeStreamRouteImport } from './routes/api.bridge.stream'
 import { Route as ApiBridgeResultRouteImport } from './routes/api.bridge.result'
 
@@ -30,6 +31,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PProjectIdRoute = PProjectIdRouteImport.update({
+  id: '/p/$projectId',
+  path: '/p/$projectId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiBridgeStreamRoute = ApiBridgeStreamRouteImport.update({
   id: '/api/bridge/stream',
   path: '/api/bridge/stream',
@@ -45,6 +51,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/mcp': typeof McpRoute
   '/perf': typeof PerfRoute
+  '/p/$projectId': typeof PProjectIdRoute
   '/api/bridge/result': typeof ApiBridgeResultRoute
   '/api/bridge/stream': typeof ApiBridgeStreamRoute
 }
@@ -52,6 +59,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/mcp': typeof McpRoute
   '/perf': typeof PerfRoute
+  '/p/$projectId': typeof PProjectIdRoute
   '/api/bridge/result': typeof ApiBridgeResultRoute
   '/api/bridge/stream': typeof ApiBridgeStreamRoute
 }
@@ -60,6 +68,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/mcp': typeof McpRoute
   '/perf': typeof PerfRoute
+  '/p/$projectId': typeof PProjectIdRoute
   '/api/bridge/result': typeof ApiBridgeResultRoute
   '/api/bridge/stream': typeof ApiBridgeStreamRoute
 }
@@ -69,15 +78,23 @@ export interface FileRouteTypes {
     | '/'
     | '/mcp'
     | '/perf'
+    | '/p/$projectId'
     | '/api/bridge/result'
     | '/api/bridge/stream'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/mcp' | '/perf' | '/api/bridge/result' | '/api/bridge/stream'
+  to:
+    | '/'
+    | '/mcp'
+    | '/perf'
+    | '/p/$projectId'
+    | '/api/bridge/result'
+    | '/api/bridge/stream'
   id:
     | '__root__'
     | '/'
     | '/mcp'
     | '/perf'
+    | '/p/$projectId'
     | '/api/bridge/result'
     | '/api/bridge/stream'
   fileRoutesById: FileRoutesById
@@ -86,6 +103,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   McpRoute: typeof McpRoute
   PerfRoute: typeof PerfRoute
+  PProjectIdRoute: typeof PProjectIdRoute
   ApiBridgeResultRoute: typeof ApiBridgeResultRoute
   ApiBridgeStreamRoute: typeof ApiBridgeStreamRoute
 }
@@ -113,6 +131,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/p/$projectId': {
+      id: '/p/$projectId'
+      path: '/p/$projectId'
+      fullPath: '/p/$projectId'
+      preLoaderRoute: typeof PProjectIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/bridge/stream': {
       id: '/api/bridge/stream'
       path: '/api/bridge/stream'
@@ -134,6 +159,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   McpRoute: McpRoute,
   PerfRoute: PerfRoute,
+  PProjectIdRoute: PProjectIdRoute,
   ApiBridgeResultRoute: ApiBridgeResultRoute,
   ApiBridgeStreamRoute: ApiBridgeStreamRoute,
 }
