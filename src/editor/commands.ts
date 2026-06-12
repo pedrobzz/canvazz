@@ -223,6 +223,37 @@ export function insertHtml(
   return { rootIds, dropped }
 }
 
+/**
+ * Replace a node with parsed HTML at the same location, as one transaction.
+ * Shared by AI write_html(replace) and the inspector's icon swap.
+ */
+export function replaceNodeHtml(
+  ctx: CommandCtx,
+  targetId: NodeId,
+  html: string,
+  label = 'Replace',
+): InsertResult {
+  const { store } = ctx
+  const target = store.doc.nodes[targetId]
+  const at = locate(store, targetId)
+  if (!target || !at) return { rootIds: [], dropped: [] }
+  const { nodes, rootIds, dropped } = parseHtml(html, {
+    isIdTaken: (id) => Boolean(store.doc.nodes[id]),
+  })
+  if (rootIds.length === 0) return { rootIds: [], dropped }
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const collect = (id: NodeId): NodeModel[] => {
+    const node = byId.get(id)
+    return node ? [node, ...node.children.flatMap(collect)] : []
+  }
+  const ops: Op[] = [{ t: 'remove', id: targetId }]
+  rootIds.forEach((rootId, i) => {
+    ops.push({ t: 'insertTree', nodes: collect(rootId), rootId, at: { ...at, index: at.index + i } })
+  })
+  store.apply(label, ops, src(ctx))
+  return { rootIds, dropped }
+}
+
 /** Serialize nodes to sanitized HTML (the copy payload). */
 export function copyNodes(ctx: CommandCtx, ids: NodeId[]): string {
   const { store } = ctx

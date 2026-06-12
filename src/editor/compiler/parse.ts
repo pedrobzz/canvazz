@@ -172,6 +172,9 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
         node.name = attr.value.slice(0, 80)
       } else if (name === 'data-cz-id') {
         // consumed by takeId
+      } else if (name === 'data-cz-icon' || name === 'data-cz-variant') {
+        // Annotation linking a vector back to its SF Symbol, for the inspector.
+        node.attrs[name] = attr.value.slice(0, 80)
       } else if (name.toLowerCase().startsWith('on') || name === 'srcdoc' || name === 'formaction') {
         dropped.push(`attr:${name}`)
       } else if (isSvgEl) {

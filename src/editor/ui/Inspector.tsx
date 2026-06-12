@@ -17,6 +17,8 @@ import {
   createMainComponent, detachInstance, setInstanceOverride, setInstanceVariant, variantsOf,
 } from '../components/componentCommands'
 import { renameNode } from '../commands'
+import { replaceNodeWithIcon } from '../icons'
+import { SFSymbol } from '@/components/SFSymbol'
 import { editorStore } from '../store/editorStore'
 import { useDocVersion, useUi } from '../store/hooks'
 import {
@@ -369,6 +371,10 @@ function SelectionInspector({ pathIds, node }: { pathIds: string[]; node: NodeMo
           <div className="text-[10px] text-[var(--cz-ai)]">Editing instance override</div>
         ) : null}
       </Section>
+
+      {node.tag === 'svg' && !isInternal ? (
+        <IconSection sourceId={sourceId} node={node} />
+      ) : null}
 
       {isInstance && node.componentId ? (
         <ComponentSection instanceId={sourceId} componentId={node.componentId} variantId={node.variantId} />
@@ -939,6 +945,56 @@ function FiltersSection({ s, write }: { s: Record<string, string>; write: StyleW
         onCommit={(v) => write({ filter: v || null })} />
       <TextField value={s['backdrop-filter'] ?? ''} placeholder="backdrop blur…" mono
         onCommit={(v) => write({ 'backdrop-filter': v || null })} />
+    </Section>
+  )
+}
+
+/** Swap the SF Symbol on a selected vector by free-text Apple name. */
+function IconSection({ sourceId, node }: { sourceId: NodeId; node: NodeModel }) {
+  const current = node.attrs['data-cz-icon'] ?? ''
+  const variant = (node.attrs['data-cz-variant'] as 'monochrome' | 'dualtone' | undefined) ?? 'monochrome'
+  const [draft, setDraft] = useState(current)
+
+  const swap = (name: string, nextVariant: 'monochrome' | 'dualtone') => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    void replaceNodeWithIcon({ store: editorStore }, sourceId, trimmed, { variant: nextVariant }).then((id) => {
+      if (id) editorStore.setSelection([id])
+    })
+  }
+
+  return (
+    <Section title="Icon">
+      <Row>
+        <TextField
+          value={draft}
+          placeholder="SF Symbol, e.g. heart.fill"
+          onCommit={(v) => {
+            setDraft(v)
+            swap(v, variant)
+          }}
+        />
+        <span
+          className="flex size-7 shrink-0 items-center justify-center rounded bg-[var(--cz-panel-hover)] text-[var(--cz-panel-fg)]"
+          title="Preview"
+        >
+          <SFSymbol name={(draft || current || 'questionmark').trim()} variant={variant} size={16} />
+        </span>
+      </Row>
+      <SelectField
+        label="Variant"
+        value={variant}
+        options={[
+          { value: 'monochrome', label: 'Monochrome' },
+          { value: 'dualtone', label: 'Dualtone' },
+        ]}
+        onCommit={(v) => swap(current || draft, v as 'monochrome' | 'dualtone')}
+      />
+      {!current ? (
+        <div className="text-[10px] text-[var(--cz-panel-muted)]">
+          Type an Apple symbol name to turn this vector into an SF Symbol.
+        </div>
+      ) : null}
     </Section>
   )
 }

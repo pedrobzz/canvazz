@@ -296,3 +296,28 @@ test('insert_icon places SF Symbols as editable vectors', async ({ page }) => {
   expect(bad.isError).toBe(true)
   expect(bad.content[0].text).toContain('Unknown SF Symbol')
 })
+
+test('inspector swaps the SF Symbol on a selected icon', async ({ page }) => {
+  textPayload(
+    await callTool(page, 'insert_icon', { name: 'heart.fill', targetId: 'artboard-1', x: 40, y: 600, size: 40 }),
+  )
+  // The inserted icon is selected; the inspector shows its Icon section.
+  const field = page.locator('[data-section="icon"] input').first()
+  await expect(field).toHaveValue('heart.fill')
+  await field.fill('star.fill')
+  await field.press('Enter')
+  // Selection follows the swap; the vector now reports star.fill.
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const cz = (window as never as {
+          __canvazz: {
+            editorStore: { ui: { selection: string[] }; doc: { nodes: Record<string, { attrs: Record<string, string> }> } }
+          }
+        }).__canvazz
+        const sel = cz.editorStore.ui.selection[0]
+        return cz.editorStore.doc.nodes[sel]?.attrs['data-cz-icon']
+      }),
+    )
+    .toBe('star.fill')
+})

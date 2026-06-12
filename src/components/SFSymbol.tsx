@@ -102,6 +102,9 @@ export async function sfSymbolMarkup(
   const style = opts.style
     ? ` style="${Object.entries(opts.style).map(([k, v]) => `${k}:${v}`).join(';')}"`
     : ''
+  const variant = opts.variant ?? 'dualtone'
   const layer = ` data-cz-name="${(opts.layerName ?? name).replace(/"/g, '')}"`
-  return markup.replace('<svg', `<svg${layer}${style}`)
+  // Round-trip the symbol identity so the inspector can swap it later.
+  const annot = ` data-cz-icon="${name.replace(/"/g, '')}" data-cz-variant="${variant}"`
+  return markup.replace('<svg', `<svg${layer}${annot}${style}`)
 }

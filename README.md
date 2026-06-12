@@ -128,7 +128,9 @@ Exports embed the tokens so the generated HTML/JSX stands alone.
 **Icons**: all 7,007 Apple SF Symbols are available by free-text name — `<Icon
 name="heart.fill" />` in app code (`src/components/Icon.tsx` / `SFSymbol.tsx`), the Assets ▸
 Icons panel, or the `insert_icon` MCP tool. Inserted icons land on the canvas as ordinary
-sanitized SVG nodes: recolorable (`currentColor`), resizable, exportable.
+sanitized SVG nodes: recolorable (`currentColor`), resizable, exportable. Selecting a vector
+shows an **Icon** section in the inspector — type any Apple name to swap the symbol in place,
+preserving placement and color (the symbol identity round-trips via `data-cz-icon`).
 
 **Fonts** are document assets: add a Google family in Assets ▸ Fonts (or via MCP `add_font`)
 and it loads as a stylesheet, shows in the typography inspector, and persists with the file.

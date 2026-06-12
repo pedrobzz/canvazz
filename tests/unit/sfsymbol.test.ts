@@ -39,6 +39,16 @@ describe('SFSymbol', () => {
     expect(dropped.filter((d) => d.startsWith('tag:'))).toHaveLength(0)
   })
 
+  it('annotates markup with data-cz-icon/variant that round-trip', async () => {
+    const markup = await sfSymbolMarkup('heart.fill', { variant: 'monochrome' })
+    expect(markup).toContain('data-cz-icon="heart.fill"')
+    expect(markup).toContain('data-cz-variant="monochrome"')
+    const { nodes, rootIds } = parseHtml(markup ?? '')
+    const root = nodes.find((n) => n.id === rootIds[0])
+    expect(root?.attrs['data-cz-icon']).toBe('heart.fill')
+    expect(root?.attrs['data-cz-variant']).toBe('monochrome')
+  })
+
   it('returns null and warns for unknown symbols', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     expect(await sfSymbolMarkup('not.a.real.symbol')).toBeNull()
