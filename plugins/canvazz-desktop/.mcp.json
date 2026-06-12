@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "canvazz": {
+      "type": "http",
+      "url": "http://localhost:47823/mcp"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "canvazz-desktop",
+  "version": "0.1.0",
+  "description": "Design on a Canvazz canvas that Claude Code can read and write through the app's integrated MCP.",
+  "author": {
+    "name": "Canvazz"
+  },
+  "homepage": "https://github.com/pedrooscar/canvazz",
+  "repository": "https://github.com/pedrooscar/canvazz",
+  "license": "MIT",
+  "keywords": [
+    "canvazz",
+    "design",
+    "ui",
+    "canvas",
+    "html",
+    "css",
+    "design-to-code",
+    "code-to-design",
+    "mcp",
+    "design-system"
+  ],
+  "skills": "./skills",
+  "mcpServers": "./mcp.json"
+}

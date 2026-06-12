@@ -1,0 +1,40 @@
+{
+  "name": "canvazz-desktop",
+  "version": "0.1.0",
+  "description": "Design on a Canvazz canvas that Codex can read and write through the app's integrated MCP.",
+  "author": {
+    "name": "Canvazz"
+  },
+  "homepage": "https://github.com/pedrooscar/canvazz",
+  "repository": "https://github.com/pedrooscar/canvazz",
+  "license": "MIT",
+  "keywords": [
+    "canvazz",
+    "design",
+    "ui",
+    "canvas",
+    "html",
+    "css",
+    "design-to-code",
+    "code-to-design",
+    "mcp",
+    "design-system"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Canvazz Desktop",
+    "shortDescription": "Read and write the live Canvazz canvas from Codex.",
+    "longDescription": "Canvazz is a DOM-native design editor whose canvas is made of sanitized HTML and CSS. This plugin connects Codex to the app's integrated MCP endpoint so agents can inspect live artboards, write HTML and SVG to the canvas, update styles and text, manage pages and components, take screenshots, and export production HTML or JSX.",
+    "developerName": "Canvazz",
+    "category": "Design",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://github.com/pedrooscar/canvazz",
+    "brandColor": "#0A9BFF",
+    "defaultPrompt": [
+      "Use my repo styles and design a settings page in Canvazz",
+      "Implement the selected Canvazz artboard in this codebase",
+      "Create a component system on the Canvazz canvas"
+    ]
+  }
+}
