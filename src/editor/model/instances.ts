@@ -49,6 +49,36 @@ export function stripPlacement(style: Record<string, string>): Record<string, st
   return out
 }
 
+/**
+ * Canonical override key for a definition node: variant clones resolve to
+ * their base-definition counterpart via refId.
+ */
+export function canonicalSourceId(doc: DocumentModel, id: NodeId): NodeId {
+  return doc.nodes[id]?.refId ?? id
+}
+
+/** Instance override for a def node, looked up by canonical id (then own id). */
+export function overrideFor(instance: NodeModel, defNode: NodeModel) {
+  return instance.overrides?.[defNode.refId ?? defNode.id] ?? instance.overrides?.[defNode.id]
+}
+
+/**
+ * Regenerates an SF Symbol's svg content for overridden data-cz-icon attrs.
+ * Injected from the editor layer (keeps the model free of React/icon deps);
+ * returns null when the registry isn't loaded yet.
+ */
+export type IconChildrenResolver = (
+  name: string,
+  variant: string,
+  size: number,
+) => { attrs: Record<string, string>; children: ResolvedNode[] } | null
+
+let iconChildrenResolver: IconChildrenResolver | null = null
+
+export function setIconChildrenResolver(fn: IconChildrenResolver) {
+  iconChildrenResolver = fn
+}
+
 export function effectiveComponentRoot(doc: DocumentModel, node: NodeModel): NodeId | null {
   if (!node.componentId) return null
   const defId = node.variantId ?? node.componentId
@@ -122,7 +152,7 @@ function resolveInstance(
   const seen = new Set(seenComponents).add(defId)
 
   const walkDef = (defNode: NodeModel, isRoot: boolean): ResolvedNode | null => {
-    const override = instance.overrides?.[defNode.id]
+    const override = overrideFor(instance, defNode)
 
     // Nested instance swap: override.componentId re-targets a nested instance.
     if (defNode.componentId && !isRoot) {
@@ -145,6 +175,38 @@ function resolveInstance(
       merged.visible = instance.visible
       if (instance.text !== undefined) merged.text = instance.text
     }
+
+    // Icon prop: an overridden data-cz-icon regenerates the svg's glyph
+    // content (the def's static paths belong to the old symbol).
+    const effIcon = merged.attrs['data-cz-icon']
+    if (
+      defNode.tag === 'svg' &&
+      effIcon &&
+      effIcon !== defNode.attrs['data-cz-icon'] &&
+      iconChildrenResolver
+    ) {
+      const size = parseFloat(merged.attrs.width ?? '') || 24
+      const regenerated = iconChildrenResolver(
+        effIcon,
+        merged.attrs['data-cz-variant'] ?? 'monochrome',
+        size,
+      )
+      if (regenerated) {
+        return {
+          pathId: isRoot ? instance.id : `${instance.id}:${defNode.id}`,
+          sourceId: isRoot ? instance.id : defNode.id,
+          instanceId: instance.id,
+          name: isRoot ? instance.name : defNode.name,
+          tag: 'svg',
+          locked: instance.locked,
+          componentId: isRoot ? defId : undefined,
+          ...merged,
+          attrs: { ...merged.attrs, ...regenerated.attrs },
+          children: regenerated.children,
+        }
+      }
+    }
+
     return {
       pathId: isRoot ? instance.id : `${instance.id}:${defNode.id}`,
       sourceId: isRoot ? instance.id : defNode.id,

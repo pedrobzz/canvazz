@@ -113,9 +113,14 @@ A main component is a flagged subtree living on canvas. Instances store only
 `{ componentId, variantId, overrides }` and *derive* their DOM from the definition at render
 time — component edits propagate to every instance immediately, while overrides (keyed by
 definition-node id: text, style, classes, visibility, attrs, nested swaps) survive. Variants
-are sibling definitions grouped in a component set. Detach materializes the resolved tree.
-Instance internals are selectable on canvas (`instanceId:sourceId` path ids) and editable as
-overrides from the inspector.
+are sibling definitions grouped in a component set; their clones carry a `refId` back to the
+base definition, so **overrides are keyed by canonical ids and survive variant switches**.
+Selecting an instance shows a **Props** panel in the inspector: every text slot and icon slot
+of the definition as editable fields (with per-slot visibility toggles — e.g. a NOW badge as a
+boolean prop). Icon slots are real props: overriding a vector's `data-cz-icon` re-renders the
+SF Symbol live and exports the exact glyph. Detach materializes the resolved tree. Instance
+internals are selectable on canvas (`instanceId:sourceId` path ids) and editable as overrides
+from the inspector.
 
 ### Design System & color tokens
 
@@ -146,8 +151,10 @@ Context first → incremental visible writes → exact reads → targeted edits 
   `update_styles`, `set_classes`, `set_text_content`, `move_nodes`, `duplicate_nodes`,
   `delete_nodes`, `rename_nodes`, `set_tokens`, `add_font`, `insert_icon` (SF Symbols).
 - **Pages:** `create_page`, `open_page`.
-- **Components:** `create_component`, `create_instance`, `create_variant`,
-  `set_instance_overrides`, `detach_instance`.
+- **Components:** `create_component` (returns the replacement instance id + canonical
+  override keys), `create_instance` (auto-layout-aware), `create_variant` (returns a
+  base→clone id map), `set_instance_overrides`, `detach_instance`, `delete_component`,
+  `set_visibility`.
 - **Workflow:** `select_nodes`, `export` (html/jsx), `undo`, `finish`.
 
 Every mutation is schema-validated (zod), transactional, undoable, and returns changed ids

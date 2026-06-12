@@ -248,6 +248,14 @@ server.registerTool('delete_nodes', {
   inputSchema: { ids: z.array(z.string()).min(1) },
 }, forward('delete_nodes'))
 
+server.registerTool('set_visibility', {
+  title: 'Show/hide layers',
+  description: 'Toggle node visibility (the layer eye, not display CSS — instance overrides can re-show hidden definition nodes).',
+  inputSchema: {
+    updates: z.array(z.object({ id: z.string(), visible: z.boolean() })).min(1),
+  },
+}, forward('set_visibility'))
+
 server.registerTool('rename_nodes', {
   title: 'Rename layers',
   description: 'Set human-readable layer names (keep them meaningful — they round-trip to code).',
@@ -283,6 +291,13 @@ server.registerTool('detach_instance', {
   description: 'Replace an instance with plain editable nodes (what it currently renders as).',
   inputSchema: { instanceId: z.string() },
 }, forward('detach_instance'))
+
+server.registerTool('delete_component', {
+  title: 'Delete a component or variant',
+  description:
+    'Remove a component definition and its Design System subtree. Refuses while instances depend on it; instances switched to a deleted variant fall back to the base.',
+  inputSchema: { componentId: z.string().min(1) },
+}, forward('delete_component'))
 
 server.registerTool('set_instance_overrides', {
   title: 'Override a component instance',

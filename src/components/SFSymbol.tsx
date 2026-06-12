@@ -19,6 +19,9 @@ export type SFSymbolProps = {
   variant?: SFVariant
   size?: SFSize
   className?: string
+  /** Canvas identity when rendered as a canvas node. */
+  'data-node-id'?: string
+  'data-cz-icon'?: string
 } & SVGProps<SVGSVGElement>
 
 type IconComponent = ComponentType<{ size?: SFSize; className?: string } & SVGProps<SVGSVGElement>>
@@ -27,6 +30,11 @@ type Registry = Record<string, IconComponent>
 const cache: Partial<Record<SFVariant, Registry>> = {}
 const pending: Partial<Record<SFVariant, Promise<Registry>>> = {}
 const listeners = new Set<() => void>()
+
+/** Synchronous registry access (null until loadSFRegistry resolves). */
+export function getCachedRegistry(variant: SFVariant): Registry | null {
+  return cache[variant] ?? null
+}
 
 /** Load (and cache) a variant's icon registry. Safe to call repeatedly. */
 export function loadSFRegistry(variant: SFVariant): Promise<Registry> {

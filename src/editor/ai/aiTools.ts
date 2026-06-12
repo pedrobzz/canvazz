@@ -9,10 +9,11 @@ import {
   deleteNodes, duplicateNodes, insertHtml, locate, renameNode, setTextContent,
 } from '../commands'
 import {
-  createInstance, createMainComponent, createVariant, detachInstance,
-  setInstanceOverride, setInstanceVariant,
+  createInstance, createMainComponent, createVariant, deleteComponent,
+  detachInstance, setInstanceOverride, setInstanceVariant,
 } from '../components/componentCommands'
 import { sfSymbolMarkup } from '@/components/SFSymbol'
+import { ensureIconRegistries } from '../iconResolver'
 import { DEFAULT_WEIGHTS, isValidFamily, syncDocumentFonts, verifyFontLoaded } from '../fonts'
 import { genId } from '../model/ids'
 import { createArtboard } from '../model/factory'
@@ -173,15 +174,17 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     }
   },
 
-  get_html(args) {
+  async get_html(args) {
     const id = args.id as string
     requireNode(id)
+    await ensureIconRegistries() // icon overrides export exact glyph content
     return { html: exportHtml(store.doc, id) }
   },
 
-  get_jsx(args) {
+  async get_jsx(args) {
     const id = args.id as string
     requireNode(id)
+    await ensureIconRegistries()
     return { jsx: exportJsx(store.doc, id) }
   },
 
@@ -386,6 +389,17 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     return { ok: true, label: 'delete_nodes', changedIds: removed, undoable: true }
   },
 
+  set_visibility(args) {
+    const updates = args.updates as Array<{ id: string; visible: boolean }>
+    if (!Array.isArray(updates) || updates.length === 0) throw new Error('updates[] is required')
+    const ops: Op[] = updates.map(({ id, visible }) => {
+      requireNode(id)
+      return { t: 'setProps', id, patch: { visible: Boolean(visible) } }
+    })
+    const tx = store.apply('AI: set visibility', ops, 'ai')
+    return mutationResult('set_visibility', tx?.changed ?? [])
+  },
+
   rename_nodes(args) {
     const renames = args.renames as Array<{ id: string; name: string }>
     for (const { id, name } of renames) {
@@ -398,24 +412,38 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   create_component(args) {
     const id = args.nodeId as string
     requireNode(id)
-    const componentId = createMainComponent({ ...AI }, [id])
-    if (!componentId) throw new Error('Cannot create a component from this node (already a component/instance/artboard?)')
+    const created = createMainComponent({ ...AI }, [id])
+    if (!created) throw new Error('Cannot create a component from this node (already a component/instance/artboard?)')
     if (args.name) {
-      const def = store.doc.components[componentId]
+      const def = store.doc.components[created.componentId]
       store.apply('AI: rename component', [
         { t: 'defineComponent', def: { ...def, name: String(args.name) } },
       ], 'ai')
     }
-    return { ...mutationResult('create_component', [id]), componentId }
+    return {
+      ...mutationResult('create_component', [created.instanceId]),
+      componentId: created.componentId,
+      /** Definition root — its node ids are the canonical override keys. */
+      rootId: created.rootId,
+      /** Linked instance now sitting where the original node was. */
+      instanceId: created.instanceId,
+      hint: 'The main moved to the Design System page; instanceId replaced it in place. Override texts/icons via set_instance_overrides keyed by the definition node ids (stable across variants).',
+    }
   },
 
   create_variant(args) {
     const componentId = args.componentId as string
     if (!store.doc.components[componentId]) throw new Error(`Unknown component: ${componentId}`)
-    const variantId = createVariant({ ...AI }, componentId, String(args.name ?? 'variant'))
-    if (!variantId) throw new Error('Failed to create variant')
-    const def = store.doc.components[variantId]
-    return { ...mutationResult('create_variant', [def.rootId]), variantId, rootId: def.rootId }
+    const created = createVariant({ ...AI }, componentId, String(args.name ?? 'variant'))
+    if (!created) throw new Error('Failed to create variant')
+    return {
+      ...mutationResult('create_variant', [created.rootId]),
+      variantId: created.variantId,
+      rootId: created.rootId,
+      /** Base node id -> this variant's clone id, for editing the variant. */
+      idMap: created.idMap,
+      hint: 'Edit this variant via the idMap clone ids. Instance overrides keep using the BASE definition ids — they apply across all variants.',
+    }
   },
 
   create_instance(args) {
@@ -436,6 +464,13 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     const rootId = detachInstance({ ...AI }, instanceId)
     if (!rootId) throw new Error(`${instanceId} is not a component instance`)
     return { ...mutationResult('detach_instance', [rootId]), rootId }
+  },
+
+  delete_component(args) {
+    const componentId = String(args.componentId ?? '')
+    const result = deleteComponent({ ...AI }, componentId)
+    if (!result.ok) throw new Error(result.reason)
+    return { ok: true, deleted: componentId, undoable: true }
   },
 
   set_instance_overrides(args) {
@@ -557,9 +592,10 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     return { ok: true, selection: ids }
   },
 
-  export(args) {
+  async export(args) {
     const id = args.id as string
     requireNode(id)
+    await ensureIconRegistries()
     const format = (args.format as string | undefined) ?? 'html'
     if (format === 'jsx') return { format, code: exportJsx(store.doc, id) }
     return { format: 'html', code: exportHtml(store.doc, id) }
@@ -600,9 +636,13 @@ export async function executeAiTool(tool: string, args: Json): Promise<Json> {
   if (!executor) throw new Error(`Unknown tool: ${tool}`)
   const result = await executor(args)
   // Mutations summarize changed nodes; wait for React to paint them so the
-  // summaries carry live rects and the model doesn't need a follow-up read.
+  // summaries carry live rects. Occluded tabs throttle rAF to a standstill,
+  // so race a timeout — a response with stale rects beats a hung tool call.
   if (Array.isArray(result.changedIds) && result.changedIds.length > 0) {
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null))))
+    await Promise.race([
+      new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))),
+      new Promise((r) => setTimeout(r, 250)),
+    ])
     result.changed = (result.changedIds as NodeId[]).map(summarize).filter(Boolean)
   }
   return result

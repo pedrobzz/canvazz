@@ -41,6 +41,12 @@ export interface NodeModel {
   isArtboard?: boolean
   /** Marks the root node of a main component definition. */
   isComponentRoot?: boolean
+  /**
+   * For variant-clone nodes: the id of the corresponding node in the base
+   * definition. Instance overrides are keyed by this canonical id, so they
+   * survive variant switches (every variant's "Name" maps to one key).
+   */
+  refId?: NodeId
   /** Set on instance nodes: which component this instance renders. */
   componentId?: string
   /** Which variant of the component set, when the component belongs to one. */

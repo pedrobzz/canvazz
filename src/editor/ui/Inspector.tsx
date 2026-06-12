@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import {
   AlignCenter, AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal,
+  Eye, EyeOff,
   AlignEndVertical, AlignJustify, AlignLeft, AlignRight, AlignStartHorizontal,
   AlignStartVertical, ArrowDown, ArrowDownToLine, ArrowLeftRight, ArrowRight,
   ArrowUpDown, ArrowUpToLine, FlipHorizontal2, FlipVertical2, MoveHorizontal,
@@ -12,7 +13,7 @@ import { exportHtml, exportJsx } from '../compiler/export'
 import { isAllowedCssProp, isSafeCssValue, sanitizeClasses, sanitizeUrl } from '../compiler/allowlist'
 import { controllerRef } from '../canvas/CanvasRoot'
 import { px, fmtPx } from '../canvas/geometry'
-import { effectiveComponentRoot, parsePathId, stripPlacement } from '../model/instances'
+import { canonicalSourceId, effectiveComponentRoot, parsePathId, stripPlacement } from '../model/instances'
 import {
   createMainComponent, detachInstance, setInstanceOverride, setInstanceVariant, variantsOf,
 } from '../components/componentCommands'
@@ -46,14 +47,17 @@ function writeStyle(pathIds: string[], set: Record<string, string | null>, label
   for (const pathId of pathIds) {
     const { instanceId, sourceId } = parsePathId(pathId)
     if (instanceId && instanceId !== pathId) {
+      // Overrides key by the canonical (base-definition) id so they apply
+      // across variants. Direct edits keep the literal node id.
+      const key = canonicalSourceId(editorStore.doc, sourceId)
       const instance = editorStore.doc.nodes[instanceId]
-      const prev = instance?.overrides?.[sourceId]?.style ?? {}
+      const prev = instance?.overrides?.[key]?.style ?? {}
       const style = { ...prev }
       for (const [k, v] of Object.entries(safe)) {
         if (v === null) delete style[k]
         else style[k] = v
       }
-      ops.push({ t: 'setOverride', id: instanceId, sourceId, patch: { style } })
+      ops.push({ t: 'setOverride', id: instanceId, sourceId: key, patch: { style } })
     } else {
       ops.push({ t: 'setStyle', id: sourceId, set: safe })
     }
@@ -86,7 +90,8 @@ function effectiveNode(pathId: string): NodeModel | null {
     }
     return base
   }
-  const override = editorStore.doc.nodes[instanceId]?.overrides?.[sourceId]
+  const override =
+    editorStore.doc.nodes[instanceId]?.overrides?.[canonicalSourceId(editorStore.doc, sourceId)]
   if (!override) return base
   return {
     ...base,
@@ -999,6 +1004,75 @@ function IconSection({ sourceId, node }: { sourceId: NodeId; node: NodeModel }) 
   )
 }
 
+interface PropSlot {
+  key: NodeId
+  label: string
+  kind: 'text' | 'icon'
+  value: string
+  visible: boolean
+}
+
+/** Editable prop slots of an instance: text leaves and icon vectors of the
+ * effective (variant-aware) definition, keyed by canonical ids so edits
+ * apply across every variant. */
+function collectPropSlots(instanceId: NodeId): PropSlot[] {
+  const doc = editorStore.doc
+  const instance = doc.nodes[instanceId]
+  const rootId = instance ? effectiveComponentRoot(doc, instance) : null
+  const slots: PropSlot[] = []
+  const walk = (id: NodeId, depth: number) => {
+    if (slots.length >= 12 || depth > 6) return
+    const n = doc.nodes[id]
+    if (!n || n.componentId) return
+    const key = n.refId ?? n.id
+    const ov = instance?.overrides?.[key]
+    if (n.tag === 'svg' && n.attrs['data-cz-icon']) {
+      slots.push({
+        key, label: n.name, kind: 'icon',
+        value: ov?.attrs?.['data-cz-icon'] ?? n.attrs['data-cz-icon'],
+        visible: ov?.visible ?? n.visible,
+      })
+    } else if (n.text !== undefined) {
+      slots.push({ key, label: n.name, kind: 'text', value: ov?.text ?? n.text, visible: ov?.visible ?? n.visible })
+    }
+    n.children.forEach((c) => walk(c, depth + 1))
+  }
+  if (rootId) doc.nodes[rootId]?.children.forEach((c) => walk(c, 1))
+  return slots
+}
+
+function PropRow({ instanceId, slot }: { instanceId: NodeId; slot: PropSlot }) {
+  const write = (patch: Parameters<typeof setInstanceOverride>[3]) =>
+    setInstanceOverride({ store: editorStore }, instanceId, slot.key, patch)
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="w-14 shrink-0 truncate text-[10px] text-[var(--cz-panel-muted)]" title={slot.label}>
+        {slot.label}
+      </span>
+      <TextField
+        value={slot.value}
+        mono={slot.kind === 'icon'}
+        onCommit={(v) =>
+          write(slot.kind === 'text' ? { text: v } : { attrs: { 'data-cz-icon': v.trim() } })
+        }
+      />
+      {slot.kind === 'icon' ? (
+        <span className="flex size-6 shrink-0 items-center justify-center rounded bg-[var(--cz-panel-hover)]">
+          <SFSymbol name={slot.value} variant="monochrome" size={12} />
+        </span>
+      ) : null}
+      <button
+        type="button"
+        aria-label={slot.visible ? `Hide ${slot.label}` : `Show ${slot.label}`}
+        className="shrink-0 p-0.5 text-[var(--cz-panel-muted)] hover:text-white"
+        onClick={() => write({ visible: !slot.visible })}
+      >
+        {slot.visible ? <Eye className="size-3" /> : <EyeOff className="size-3" />}
+      </button>
+    </div>
+  )
+}
+
 function ComponentSection({ instanceId, componentId, variantId }: {
   instanceId: NodeId
   componentId: string
@@ -1006,6 +1080,7 @@ function ComponentSection({ instanceId, componentId, variantId }: {
 }) {
   const def = editorStore.doc.components[componentId]
   const variants = variantsOf(editorStore, componentId)
+  const slots = collectPropSlots(instanceId)
   if (!def) return null
   return (
     <Section
@@ -1031,6 +1106,14 @@ function ComponentSection({ instanceId, componentId, variantId }: {
           }))}
           onCommit={(v) => setInstanceVariant({ store: editorStore }, instanceId, v)}
         />
+      ) : null}
+      {slots.length > 0 ? (
+        <>
+          <div className="pt-1 text-[10px] text-[var(--cz-panel-muted)]">Props</div>
+          {slots.map((slot) => (
+            <PropRow key={slot.key + slot.kind} instanceId={instanceId} slot={slot} />
+          ))}
+        </>
       ) : null}
       {editorStore.doc.nodes[instanceId]?.overrides &&
       Object.keys(editorStore.doc.nodes[instanceId].overrides ?? {}).length > 0 ? (

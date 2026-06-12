@@ -321,3 +321,107 @@ test('inspector swaps the SF Symbol on a selected icon', async ({ page }) => {
     )
     .toBe('star.fill')
 })
+
+test('component stress: props, icon overrides, variants, delete', async ({ page }) => {
+  test.setTimeout(90_000)
+  // 1. Componentize the card: result carries componentId, rootId, AND the
+  //    replacement instance id (no follow-up read needed).
+  const created = textPayload(
+    await callTool(page, 'create_component', { nodeId: 'card-1', name: 'Card' }),
+  ) as { componentId: string; rootId: string; instanceId: string }
+  expect(created.instanceId).toBeTruthy()
+  expect(created.rootId).toBe('card-1')
+  await expect(page.locator(`[data-node-id="${created.instanceId}"]`)).toBeVisible()
+
+  // 2. Give the definition an icon slot; instances pick it up instantly.
+  const icon = textPayload(
+    await callTool(page, 'insert_icon', { name: 'heart.fill', targetId: 'card-1', size: 24 }),
+  ) as { changedIds: string[] }
+  const iconDefId = icon.changedIds[0]
+  const defViewBox = await page.evaluate(
+    (sel) => document.querySelector(sel)?.getAttribute('viewBox'),
+    `[data-node-id="${created.instanceId}:${iconDefId}"]`,
+  )
+  expect(defViewBox).toBeTruthy()
+
+  // 3. Icon prop: per-instance data-cz-icon override renders the new glyph.
+  textPayload(
+    await callTool(page, 'set_instance_overrides', {
+      instanceId: created.instanceId,
+      overrides: {
+        [iconDefId]: { attrs: { 'data-cz-icon': 'star.fill' } },
+        'title-1': { text: 'Stressed!' },
+      },
+    }),
+  )
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        (sel) => document.querySelector(sel)?.getAttribute('viewBox'),
+        `[data-node-id="${created.instanceId}:${iconDefId}"]`,
+      ),
+    )
+    .not.toBe(defViewBox)
+  await expect(page.locator(`[data-node-id="${created.instanceId}:title-1"]`)).toHaveText('Stressed!')
+
+  // 4. Variants ship an id map; overrides keyed by BASE ids survive switching.
+  const variant = textPayload(
+    await callTool(page, 'create_variant', { componentId: created.componentId, name: 'alt' }),
+  ) as { variantId: string; idMap: Record<string, string> }
+  expect(Object.keys(variant.idMap).length).toBeGreaterThan(3)
+  expect(variant.idMap['title-1']).toBeTruthy()
+  textPayload(
+    await callTool(page, 'set_instance_overrides', {
+      instanceId: created.instanceId,
+      variantId: variant.variantId,
+    }),
+  )
+  await expect(
+    page.locator(`[data-node-id="${created.instanceId}:${variant.idMap['title-1']}"]`),
+  ).toHaveText('Stressed!')
+
+  // 5. set_visibility on a def node hides it in instances; an override re-shows
+  //    it (keyed by the BASE id, applying to the variant clone via refId).
+  textPayload(
+    await callTool(page, 'set_visibility', {
+      updates: [{ id: variant.idMap['body-1'], visible: false }],
+    }),
+  )
+  await expect(page.locator(`[data-node-id="${created.instanceId}:${variant.idMap['body-1']}"]`)).toBeHidden()
+  textPayload(
+    await callTool(page, 'set_instance_overrides', {
+      instanceId: created.instanceId,
+      overrides: { 'body-1': { visible: true } },
+    }),
+  )
+  await expect(page.locator(`[data-node-id="${created.instanceId}:${variant.idMap['body-1']}"]`)).toBeVisible()
+
+  // 6. delete_component refuses while depended upon, then succeeds.
+  const refused = await callTool(page, 'delete_component', { componentId: created.componentId })
+  expect(refused.isError).toBe(true)
+  const okDelete = textPayload(
+    await callTool(page, 'delete_component', { componentId: variant.variantId }),
+  ) as { ok: boolean }
+  expect(okDelete.ok).toBe(true)
+  // The instance fell back to the base definition and still renders overrides.
+  await expect(page.locator(`[data-node-id="${created.instanceId}:title-1"]`)).toHaveText('Stressed!')
+
+  // 7. Instances join the flow inside auto-layout containers.
+  const flexBox = textPayload(
+    await callTool(page, 'write_html', {
+      targetId: 'artboard-1',
+      html: '<div data-cz-name="Slot" style="position:absolute;left:10px;top:560px;display:flex;flex-direction:column;gap:8px;width:340px"></div>',
+    }),
+  ) as { changedIds: string[] }
+  const flowInst = textPayload(
+    await callTool(page, 'create_instance', { componentId: created.componentId, parentId: flexBox.changedIds[0] }),
+  ) as { instanceId: string }
+  const flowStyle = await page.evaluate((id) => {
+    const cz = (window as never as {
+      __canvazz: { editorStore: { doc: { nodes: Record<string, { style: Record<string, string> }> } } }
+    }).__canvazz
+    return cz.editorStore.doc.nodes[id]?.style
+  }, flowInst.instanceId)
+  expect(flowStyle.position).toBeUndefined()
+  expect(flowStyle.left).toBeUndefined()
+})

@@ -1,7 +1,7 @@
 import { genId } from '../model/ids'
-import { parsePathId, resolveNode } from '../model/instances'
+import { canonicalSourceId, parsePathId, resolveNode } from '../model/instances'
 import { px, fmtPx } from '../canvas/geometry'
-import { locate } from '../commands'
+import { isLayoutContainer, locate } from '../commands'
 import { sanitizeStyle } from '../compiler/parse'
 import { sanitizeClasses } from '../compiler/allowlist'
 import type { ResolvedNode } from '../model/instances'
@@ -32,7 +32,15 @@ export const DESIGN_SYSTEM_PAGE_ID = 'page_design_system'
  * (created on demand) and a linked instance takes its place, so the original
  * layout is visually unchanged while every main lives in one place.
  */
-export function createMainComponent(ctx: Ctx, selection: string[]): string | null {
+export interface CreateComponentResult {
+  componentId: string
+  /** The linked instance left in the original location. */
+  instanceId: NodeId
+  /** The main definition's root (moved to the Design System page). */
+  rootId: NodeId
+}
+
+export function createMainComponent(ctx: Ctx, selection: string[]): CreateComponentResult | null {
   const { store } = ctx
   if (selection.length !== 1) return null
   const id = parsePathId(selection[0]).sourceId
@@ -94,7 +102,7 @@ export function createMainComponent(ctx: Ctx, selection: string[]): string | nul
   store.apply('Create component', ops, src(ctx))
   store.setSelection([instance.id])
   store.recordSelectionAfter()
-  return componentId
+  return { componentId, instanceId: instance.id, rootId: id }
 }
 
 export function createInstance(
@@ -108,18 +116,24 @@ export function createInstance(
   const defRoot = def ? store.doc.nodes[def.rootId] : null
   if (!def || !defRoot) return null
 
+  // Instances join the flow inside auto-layout containers; elsewhere they
+  // place absolutely at the requested position.
+  const parentNode = at.kind === 'node' ? store.doc.nodes[at.parent] : null
+  const flow = parentNode ? isLayoutContainer(parentNode) : false
   const instance: NodeModel = {
     id: genId('inst'),
     name: def.name,
     tag: defRoot.tag,
     attrs: {},
-    style: {
-      position: 'absolute',
-      left: fmtPx(position.x),
-      top: fmtPx(position.y),
-      ...(defRoot.style.width ? { width: defRoot.style.width } : {}),
-      ...(defRoot.style.height ? { height: defRoot.style.height } : {}),
-    },
+    style: flow
+      ? {}
+      : {
+          position: 'absolute',
+          left: fmtPx(position.x),
+          top: fmtPx(position.y),
+          ...(defRoot.style.width ? { width: defRoot.style.width } : {}),
+          ...(defRoot.style.height ? { height: defRoot.style.height } : {}),
+        },
     classes: [],
     children: [],
     parent: null,
@@ -137,11 +151,18 @@ export function createInstance(
  * Add a variant to a component: clones the definition subtree next to the
  * original and groups both into a component set.
  */
+export interface CreateVariantResult {
+  variantId: string
+  rootId: NodeId
+  /** Base-definition node id -> this variant's cloned node id. */
+  idMap: Record<NodeId, NodeId>
+}
+
 export function createVariant(
   ctx: Ctx,
   componentId: string,
   variantName: string,
-): string | null {
+): CreateVariantResult | null {
   const { store } = ctx
   const def = store.doc.components[componentId]
   const defRoot = def ? store.doc.nodes[def.rootId] : null
@@ -157,6 +178,8 @@ export function createVariant(
     const copy: NodeModel = {
       ...orig,
       id: newId,
+      // Overrides stay keyed by the base definition's ids across variants.
+      refId: orig.refId ?? id,
       parent,
       attrs: { ...orig.attrs },
       style: { ...orig.style },
@@ -205,7 +228,45 @@ export function createVariant(
     })
   }
   store.apply(`Add variant ${variantName}`, ops, src(ctx))
-  return variantId
+  return { variantId, rootId: newRootId, idMap: Object.fromEntries(cloneIds) }
+}
+
+/**
+ * Delete a component definition (or one variant). The definition subtree is
+ * removed from the Design System page. Refuses while instances still depend
+ * on it; instances merely *switched* to a deleted variant fall back to base.
+ */
+export function deleteComponent(ctx: Ctx, componentId: string): { ok: true } | { ok: false; reason: string } {
+  const { store } = ctx
+  const def = store.doc.components[componentId]
+  if (!def) return { ok: false, reason: `Unknown component: ${componentId}` }
+
+  const set = def.setId ? store.doc.componentSets[def.setId] : null
+  const isBaseWithVariants =
+    set && set.variantIds.length > 1 && (set.defaultVariantId === componentId || set.variantIds[0] === componentId)
+  if (isBaseWithVariants) {
+    return { ok: false, reason: 'Delete the other variants first — this is the base definition of a set.' }
+  }
+  const dependents = Object.values(store.doc.nodes).filter((n) => n.componentId === componentId)
+  if (dependents.length > 0) {
+    return { ok: false, reason: `${dependents.length} instance(s) still use this component — detach or delete them first.` }
+  }
+
+  const ops: Op[] = []
+  // Instances pointing at this as a *variant* fall back to their base.
+  for (const n of Object.values(store.doc.nodes)) {
+    if (n.variantId === componentId) ops.push({ t: 'setProps', id: n.id, patch: { variantId: null } })
+  }
+  if (store.doc.nodes[def.rootId]) ops.push({ t: 'remove', id: def.rootId })
+  ops.push({ t: 'removeComponent', id: componentId })
+  if (set) {
+    ops.push({
+      t: 'defineComponentSet',
+      set: { ...set, variantIds: set.variantIds.filter((v) => v !== componentId) },
+    })
+  }
+  store.apply(`Delete component ${def.name}`, ops, src(ctx))
+  return { ok: true }
 }
 
 /** Replace an instance with plain nodes (what it currently renders as). */
@@ -258,6 +319,8 @@ export function setInstanceOverride(
   const { store } = ctx
   const instance = store.doc.nodes[instanceId]
   if (!instance?.componentId) return false
+  // Writes use the canonical (base-definition) key so they apply to every variant.
+  sourceId = canonicalSourceId(store.doc, sourceId)
   let safe: NodeOverride | null = null
   if (patch) {
     safe = { ...patch }

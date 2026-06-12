@@ -1,6 +1,8 @@
 import { createElement, memo, useEffect, useRef, useSyncExternalStore } from 'react'
 import { styleToReact } from '../compiler/export'
-import { applyOverride, effectiveComponentRoot, stripPlacement } from '../model/instances'
+import { applyOverride, effectiveComponentRoot, overrideFor, stripPlacement } from '../model/instances'
+import { SFSymbol } from '@/components/SFSymbol'
+import type { SFVariant } from '@/components/SFSymbol'
 import { setTextContent } from '../commands'
 import { editorStore } from '../store/editorStore'
 import { useNode } from '../store/hooks'
@@ -181,7 +183,7 @@ const DefNodeView = memo(function DefNodeView({
 }) {
   const defNode = useNode(defId)
   if (!defNode) return null
-  const override = instance.overrides?.[defId]
+  const override = overrideFor(instance, defNode)
 
   // Nested instance (or swapped one) inside the definition.
   if (defNode.componentId && !isRoot) {
@@ -216,6 +218,25 @@ const DefNodeView = memo(function DefNodeView({
   }
 
   const pathId = isRoot ? instance.id : `${instance.id}:${defId}`
+
+  // Icon prop: an overridden data-cz-icon renders the live SF Symbol — the
+  // definition's static paths belong to the old glyph.
+  const effIcon = merged.attrs['data-cz-icon']
+  if (defNode.tag === 'svg' && effIcon && effIcon !== defNode.attrs['data-cz-icon']) {
+    const reactStyle = styleToReact(style) as CSSProperties & Record<string, string>
+    if (!visible) reactStyle.display = 'none'
+    return (
+      <SFSymbol
+        name={effIcon}
+        variant={(merged.attrs['data-cz-variant'] as SFVariant) ?? 'monochrome'}
+        size={parseFloat(merged.attrs.width ?? '') || 24}
+        data-node-id={pathId}
+        data-cz-icon={effIcon}
+        style={reactStyle}
+      />
+    )
+  }
+
   const props = buildProps({
     tag: defNode.tag, pathId, attrs: merged.attrs, style, classes, text, visible,
   })
