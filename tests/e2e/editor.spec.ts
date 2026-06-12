@@ -115,6 +115,20 @@ test('double-click deep-selects and edits text in place', async ({ page }) => {
   await expect(page.locator('[data-node-id="title-1"]')).toHaveText('Hello Canvazz')
 })
 
+test('text edit commits when clicking away (blur), not only on Escape', async ({ page }) => {
+  const title = await centerOf(page, 'title-1')
+  await page.mouse.dblclick(title.x, title.y) // deep-select
+  await page.mouse.dblclick(title.x, title.y) // edit
+  await expect(page.locator('[data-canvas-text]')).toBeVisible()
+  await page.keyboard.press(`${modifier}+a`)
+  await page.keyboard.type('Committed on blur')
+  // Click empty canvas: the controller clears editingTextId on pointerdown,
+  // unmounting the editor; the edit must still commit from the captured node.
+  await page.mouse.click(title.x + 320, title.y + 320)
+  expect(await nodeField(page, 'title-1', 'text')).toBe('Committed on blur')
+  await expect(page.locator('[data-node-id="title-1"]')).toHaveText('Committed on blur')
+})
+
 test('inspector edits width and background live', async ({ page }) => {
   const card = await centerOf(page, 'card-1')
   await page.mouse.click(card.x, card.y)

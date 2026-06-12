@@ -147,13 +147,16 @@ function EditableText({ node }: { node: NodeModel }) {
     const sel = window.getSelection()
     sel?.removeAllRanges()
     sel?.addRange(range)
-    return () => commit(false)
+    // Commit from the captured element, not ref.current. Clicking elsewhere
+    // unmounts this node (the controller clears editingTextId on pointerdown),
+    // and React nulls ref.current before this cleanup runs — but `el` still
+    // points at the now-detached node, whose textContent holds the edit.
+    return () => commit(el, false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   /** Commit text; optionally end editing (cleanup must not end it). */
-  const commit = (clearEditing: boolean) => {
-    const el = ref.current
+  const commit = (el: HTMLElement | null, clearEditing: boolean) => {
     if (!committed.current && el && el.textContent !== initialText) {
       committed.current = true
       setTextContent({ store: editorStore }, node.id, el.textContent ?? '')
@@ -173,12 +176,12 @@ function EditableText({ node }: { node: NodeModel }) {
     contentEditable: true,
     suppressContentEditableWarning: true,
     'data-canvas-text': true,
-    onBlur: () => commit(true),
+    onBlur: () => commit(ref.current, true),
     onKeyDown: (e: React.KeyboardEvent) => {
       e.stopPropagation()
       if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey))) {
         e.preventDefault()
-        commit(true)
+        commit(ref.current, true)
       }
     },
     onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
