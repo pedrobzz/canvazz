@@ -38,6 +38,9 @@
   --cz-panel-border: #38383b;
   --cz-panel-hover: #2f2f31;
   --cz-panel-active: #37373a;
+  --cz-scrollbar-thumb: rgba(255, 255, 255, 0.18);
+  --cz-scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
+  --cz-scrollbar-thumb-active: rgba(255, 255, 255, 0.38);
 }
 
 .dark {
@@ -269,6 +272,47 @@ body {
 }
 .cz-panel ::placeholder {
   color: var(--cz-panel-muted);
+}
+
+/* macOS-style overlay scrollbars: thin pill thumb, transparent track */
+.cz-panel:is(.overflow-y-auto, .overflow-auto),
+.cz-panel :is(.overflow-y-auto, .overflow-auto) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--cz-scrollbar-thumb) transparent;
+}
+
+.cz-panel:is(.overflow-y-auto, .overflow-auto)::-webkit-scrollbar,
+.cz-panel :is(.overflow-y-auto, .overflow-auto)::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.cz-panel:is(.overflow-y-auto, .overflow-auto)::-webkit-scrollbar-track,
+.cz-panel :is(.overflow-y-auto, .overflow-auto)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cz-panel:is(.overflow-y-auto, .overflow-auto)::-webkit-scrollbar-thumb,
+.cz-panel :is(.overflow-y-auto, .overflow-auto)::-webkit-scrollbar-thumb {
+  background-color: var(--cz-scrollbar-thumb);
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: content-box;
+}
+
+.cz-panel:is(.overflow-y-auto, .overflow-auto)::-webkit-scrollbar-thumb:hover,
+.cz-panel :is(.overflow-y-auto, .overflow-auto)::-webkit-scrollbar-thumb:hover {
+  background-color: var(--cz-scrollbar-thumb-hover);
+}
+
+.cz-panel:is(.overflow-y-auto, .overflow-auto)::-webkit-scrollbar-thumb:active,
+.cz-panel :is(.overflow-y-auto, .overflow-auto)::-webkit-scrollbar-thumb:active {
+  background-color: var(--cz-scrollbar-thumb-active);
+}
+
+.cz-panel:is(.overflow-y-auto, .overflow-auto)::-webkit-scrollbar-corner,
+.cz-panel :is(.overflow-y-auto, .overflow-auto)::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* Boxed inspector field: [icon][input][unit]. The icon doubles as a scrub
