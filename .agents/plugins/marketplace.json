@@ -1,0 +1,20 @@
+{
+  "name": "canvazz-local",
+  "interface": {
+    "displayName": "Canvazz Local"
+  },
+  "plugins": [
+    {
+      "name": "canvazz-desktop",
+      "source": {
+        "source": "local",
+        "path": "./plugins/canvazz-desktop"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Design"
+    }
+  ]
+}
