@@ -1,5 +1,5 @@
 import {
-  Circle, Component, Frame, Hand, Hexagon, Minus, MessageSquare, MousePointer2,
+  Circle, Component, Frame, Hand, Hexagon, Minus, MousePointer2,
   Redo2, Slash, Sparkles, Square, Star, Type, Undo2,
 } from 'lucide-react'
 import { useSyncExternalStore } from 'react'
@@ -25,7 +25,6 @@ const TOOLS: Array<{ tool: Tool; icon: typeof Square; label: string; key: string
   { tool: 'polygon', icon: Hexagon, label: 'Polygon', key: 'P' },
   { tool: 'star', icon: Star, label: 'Star', key: 'S' },
   { tool: 'text', icon: Type, label: 'Text', key: 'T' },
-  { tool: 'comment', icon: MessageSquare, label: 'Comment', key: 'C' },
 ]
 
 function ToolButton({ tool, icon: Icon, label, keyLabel }: {

@@ -268,19 +268,6 @@ function applyOp(draft: Draft, op: Op): Op {
       // Assets are content-addressed blobs; undo keeps them (harmless, stable refs).
       return { t: 'addAsset', asset: op.asset }
     }
-    case 'addComment': {
-      draft.doc.comments = [...draft.doc.comments, op.comment]
-      return { t: 'setComment', id: op.comment.id, patch: { resolved: true } }
-    }
-    case 'setComment': {
-      const index = draft.doc.comments.findIndex((c) => c.id === op.id)
-      if (index < 0) throw new Error(`Unknown comment: ${op.id}`)
-      const prev = draft.doc.comments[index]
-      const comments = [...draft.doc.comments]
-      comments[index] = { ...prev, ...op.patch }
-      draft.doc.comments = comments
-      return { t: 'setComment', id: op.id, patch: { body: prev.body, resolved: prev.resolved } }
-    }
   }
 }
 
@@ -307,6 +294,5 @@ export function emptyDocument(id: string, name: string): DocumentModel {
     tokens: {},
     fonts: {},
     assets: {},
-    comments: [],
   }
 }

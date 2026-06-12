@@ -168,19 +168,6 @@ export class InteractionController {
       return
     }
 
-    if (tool === 'comment') {
-      const world = this.toWorld(e)
-      store.apply('Add comment', [{
-        t: 'addComment',
-        comment: {
-          id: `c_${Date.now().toString(36)}`, nodeId: null, x: world.x, y: world.y,
-          author: 'You', body: '', createdAt: Date.now(), resolved: false,
-        },
-      }])
-      store.setTool('select')
-      return
-    }
-
     // Select tool. Resize/rotate handles first (they live in the overlay).
     const handle = (e.target as Element).closest?.('[data-handle]')
     if (handle instanceof HTMLElement && store.ui.selection.length > 0) {
@@ -837,7 +824,7 @@ export class InteractionController {
 
     const toolKeys: Record<string, Tool> = {
       v: 'select', h: 'hand', f: 'frame', t: 'text', r: 'rect',
-      o: 'ellipse', l: 'line', p: 'polygon', s: 'star', c: 'comment',
+      o: 'ellipse', l: 'line', p: 'polygon', s: 'star',
     }
     const tool = toolKeys[e.key.toLowerCase()]
     if (tool) {

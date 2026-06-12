@@ -106,18 +106,6 @@ export interface AssetModel {
   url: string
 }
 
-export interface CommentModel {
-  id: string
-  nodeId: NodeId | null
-  /** World coordinates of the comment pin. */
-  x: number
-  y: number
-  author: string
-  body: string
-  createdAt: number
-  resolved: boolean
-}
-
 export interface DocumentModel {
   id: string
   name: string
@@ -132,7 +120,6 @@ export interface DocumentModel {
   /** Fonts available to the document, keyed by family name. */
   fonts: Record<string, FontModel>
   assets: Record<string, AssetModel>
-  comments: CommentModel[]
 }
 
 /** Where a node lives: under another node, or at the top level of a page. */
@@ -162,8 +149,6 @@ export type Op =
   | { t: 'removePage'; id: string }
   | { t: 'setPageName'; id: string; name: string }
   | { t: 'addAsset'; asset: AssetModel }
-  | { t: 'addComment'; comment: CommentModel }
-  | { t: 'setComment'; id: string; patch: Partial<Pick<CommentModel, 'body' | 'resolved'>> }
 
 export interface NodePropsPatch {
   name?: string

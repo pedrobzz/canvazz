@@ -13,7 +13,6 @@ export type Tool =
   | 'line'
   | 'polygon'
   | 'star'
-  | 'comment'
   | 'component'
   | 'ai'
 
@@ -194,7 +193,6 @@ export class EditorStore {
       fonts: doc.fonts ?? {},
       assets: doc.assets ?? {},
       componentSets: doc.componentSets ?? {},
-      comments: doc.comments ?? [],
     })
     this.undoStack = []
     this.redoStack = []
