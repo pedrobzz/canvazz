@@ -22,9 +22,11 @@ import type { ChartDatum, ChartType } from '../charts'
 import { DEFAULT_WEIGHTS, isSystemFont, isValidFamily, SYSTEM_FONTS, syncDocumentFonts, verifyFontLoaded } from '../fonts'
 import { genId } from '../model/ids'
 import { createArtboard } from '../model/factory'
+import { resolveNode } from '../model/instances'
+import type { ResolvedNode } from '../model/instances'
 import { editorStore } from '../store/editorStore'
 import type { EditorStore } from '../store/editorStore'
-import type { FlowLink, NodeId, NodeLocation, NodeModel, Op } from '../model/types'
+import type { DocumentModel, FlowLink, NodeId, NodeLocation, NodeModel, Op } from '../model/types'
 
 /**
  * Browser-side executors for MCP tools. Every mutation goes through the
@@ -68,6 +70,33 @@ function summarize(id: NodeId): Json | null {
 }
 
 const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s)
+
+/**
+ * Overridable slots of an instance: every internal node (not the root) with the
+ * `sourceId` that set_instance_overrides keys on, plus its `pathId` for reads
+ * and a content hint. Lets callers discover override targets instead of having
+ * to remember the original write's createdNodes ids.
+ */
+function slotsOf(doc: DocumentModel, instanceId: NodeId): Json[] {
+  const resolved = resolveNode(doc, instanceId)
+  if (!resolved) return []
+  const out: Json[] = []
+  const walk = (n: ResolvedNode, isRoot: boolean) => {
+    if (!isRoot) {
+      out.push({
+        sourceId: n.sourceId,
+        pathId: n.pathId,
+        name: n.name,
+        tag: n.tag,
+        ...(n.text !== undefined ? { text: truncate(n.text, 60) } : {}),
+        ...(n.attrs['data-cz-icon'] ? { icon: n.attrs['data-cz-icon'] } : {}),
+      })
+    }
+    n.children.forEach((c) => walk(c, false))
+  }
+  walk(resolved, true)
+  return out
+}
 
 function mutationResult(label: string, changed: NodeId[]): Json {
   return {
@@ -246,11 +275,17 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
 
   get_node_info(args) {
     const node = requireNode(args.id as string)
+    // An instance derives its subtree from the component definition, so
+    // node.children is empty. Resolve it and surface the overridable slots —
+    // the `sourceId`s that set_instance_overrides keys on — so callers don't
+    // have to remember the original write's createdNodes ids.
+    const overridableSlots = node.componentId ? slotsOf(store.doc, node.id) : undefined
     return {
       ...node,
       rect: rectOf(node.id),
       parentSummary: node.parent ? summarize(node.parent) : null,
       childSummaries: node.children.map(summarize),
+      ...(overridableSlots ? { overridableSlots } : {}),
     }
   },
 
@@ -654,10 +689,13 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     const componentId = args.componentId as string
     if (!store.doc.components[componentId]) throw new Error(`Unknown component: ${componentId}`)
     const at = locationFor(args.parentId as string | undefined)
-    const instanceId = createInstance({ ...AI }, componentId, at, {
-      x: (args.x as number | undefined) ?? 0,
-      y: (args.y as number | undefined) ?? 0,
-    })
+    // Only place absolutely when an explicit position is given; otherwise let
+    // the instance flow inside its target container (see createInstance).
+    const position =
+      args.x !== undefined || args.y !== undefined
+        ? { x: Number(args.x) || 0, y: Number(args.y) || 0 }
+        : undefined
+    const instanceId = createInstance({ ...AI }, componentId, at, position)
     if (!instanceId) throw new Error('Failed to create instance')
     const inst = store.doc.nodes[instanceId]
     return {

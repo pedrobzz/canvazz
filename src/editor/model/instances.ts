@@ -50,6 +50,19 @@ export function stripPlacement(style: Record<string, string>): Record<string, st
 }
 
 /**
+ * The placement subset of a style (inverse of stripPlacement). Lets a
+ * componentized node hand its FULL placement — not just left/top — to the
+ * replacement instance, so a `bottom`/`right`-pinned element stays pinned.
+ */
+export function pickPlacement(style: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const prop of PLACEMENT_PROPS) {
+    if (style[prop] !== undefined) out[prop] = style[prop]
+  }
+  return out
+}
+
+/**
  * Component-set container geometry. A set is a real flex-column frame whose
  * children are the variant roots; flexbox stacks them and `fit-content` sizes
  * the frame, so adding/removing variants reflows with no manual layout math.
