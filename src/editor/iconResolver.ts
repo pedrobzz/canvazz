@@ -127,6 +127,60 @@ export interface IconMatch {
 }
 
 /**
+ * Plain-English → canonical SF Symbol name. The registry only knows Apple's
+ * tokens (`magnifyingglass`, `chevron.left`), so a natural query like "search"
+ * or "back" found nothing. We expand the query with these targets and score the
+ * union, so the documented "plain English" search actually works. Keys are the
+ * words a designer types; values are real SF names.
+ */
+const ICON_SYNONYMS: Record<string, string> = {
+  search: 'magnifyingglass', find: 'magnifyingglass', magnify: 'magnifyingglass',
+  back: 'chevron.left', previous: 'chevron.left', forward: 'chevron.right', next: 'chevron.right',
+  expand: 'chevron.down', collapse: 'chevron.up',
+  close: 'xmark', dismiss: 'xmark', cancel: 'xmark',
+  menu: 'line.3.horizontal', hamburger: 'line.3.horizontal', more: 'ellipsis',
+  settings: 'gearshape', preferences: 'gearshape', options: 'slider.horizontal.3',
+  home: 'house', profile: 'person.crop.circle', user: 'person', account: 'person.crop.circle',
+  people: 'person.2', group: 'person.3',
+  location: 'mappin', pin: 'mappin', map: 'map', address: 'mappin.and.ellipse',
+  call: 'phone', message: 'bubble.left', chat: 'bubble.left.and.bubble.right', comment: 'bubble.right',
+  cart: 'cart', basket: 'cart', bag: 'bag', store: 'storefront',
+  like: 'heart', favorite: 'heart', love: 'heart.fill',
+  share: 'square.and.arrow.up', send: 'paperplane', upload: 'square.and.arrow.up', download: 'square.and.arrow.down',
+  notification: 'bell', alert: 'bell', reminder: 'bell',
+  add: 'plus', new: 'plus', create: 'plus', remove: 'minus',
+  edit: 'pencil', write: 'square.and.pencil', delete: 'trash', bin: 'trash',
+  camera: 'camera', photo: 'photo', image: 'photo', picture: 'photo', gallery: 'photo.on.rectangle',
+  calendar: 'calendar', date: 'calendar', schedule: 'calendar',
+  clock: 'clock', time: 'clock', timer: 'timer',
+  lock: 'lock', secure: 'lock', password: 'lock', unlock: 'lock.open',
+  star: 'star', rating: 'star', filter: 'line.3.horizontal.decrease', sort: 'arrow.up.arrow.down',
+  card: 'creditcard', payment: 'creditcard', wallet: 'wallet.pass', money: 'banknote', bank: 'building.columns',
+  check: 'checkmark', done: 'checkmark', info: 'info.circle', help: 'questionmark.circle',
+  warning: 'exclamationmark.triangle', error: 'xmark.circle',
+  play: 'play.fill', pause: 'pause.fill', stop: 'stop.fill',
+  email: 'envelope', mail: 'envelope', inbox: 'tray',
+  link: 'link', attach: 'paperclip', file: 'doc', document: 'doc', folder: 'folder',
+  refresh: 'arrow.clockwise', reload: 'arrow.clockwise', sync: 'arrow.triangle.2.circlepath',
+  logout: 'rectangle.portrait.and.arrow.right', exit: 'rectangle.portrait.and.arrow.right',
+  eye: 'eye', view: 'eye', show: 'eye', hide: 'eye.slash',
+  bookmark: 'bookmark', gift: 'gift', tag: 'tag', dashboard: 'square.grid.2x2',
+  workout: 'figure.run', run: 'figure.run', fitness: 'figure.run', heart_rate: 'heart.text.square',
+}
+
+/** Canonical SF targets implied by an English query (whole query + per word). */
+function synonymTargets(query: string): string[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return []
+  const out = new Set<string>()
+  if (ICON_SYNONYMS[q]) out.add(ICON_SYNONYMS[q])
+  for (const word of q.split(/[\s.]+/)) {
+    if (ICON_SYNONYMS[word]) out.add(ICON_SYNONYMS[word])
+  }
+  return [...out]
+}
+
+/**
  * Compact Damerau-free edit distance, capped at `max` so far-apart strings
  * exit early. Only used for the lowest scoring tier (typo recovery), so the
  * cap keeps a 7k-name sweep cheap.
@@ -162,6 +216,18 @@ export function scoreIconName(query: string, name: string): number {
   const idx = name.indexOf(q)
   if (idx >= 0) return 600 - idx - (name.length - q.length)
 
+  // Collapsed match: ignore dot/space boundaries so "magnifying glass" hits
+  // "magnifyingglass" and "chevron right" hits "chevron.right". Scored just
+  // below the equivalent raw tier so a literal token match still wins.
+  const qc = q.replace(/[.\s]+/g, '')
+  const nc = name.replace(/\./g, '')
+  if (qc.length >= 2 && (qc !== q || nc !== name)) {
+    if (nc === qc) return 950
+    if (nc.startsWith(qc)) return 760 - (nc.length - qc.length)
+    const ci = nc.indexOf(qc)
+    if (ci >= 0) return 560 - ci - (nc.length - qc.length)
+  }
+
   const qTokens = q.split(/[.\s]+/).filter(Boolean)
   const nTokens = name.split('.')
   const nSet = new Set(nTokens)
@@ -169,7 +235,9 @@ export function scoreIconName(query: string, name: string): number {
   let prefixHits = 0
   for (const t of qTokens) {
     if (nSet.has(t)) overlap++
-    else if (nTokens.some((n) => n.startsWith(t) || t.startsWith(n))) prefixHits++
+    // A prefix hit needs ≥3 shared leading chars — otherwise a 1-letter SF
+    // token (`g` in g.circle) spuriously matched query words like "glass".
+    else if (nTokens.some((n) => Math.min(n.length, t.length) >= 3 && (n.startsWith(t) || t.startsWith(n)))) prefixHits++
   }
   if (overlap > 0 || prefixHits > 0) {
     return 300 + overlap * 80 + prefixHits * 30 - Math.abs(nTokens.length - qTokens.length) * 5
@@ -191,9 +259,16 @@ export function scoreIconName(query: string, name: string): number {
 
 /** Rank a name list by query relevance, best first, dropping non-matches. */
 export function scoreIcons(query: string, names: string[], limit: number): IconMatch[] {
+  // Score against the literal query AND any plain-English synonym targets, so
+  // "search" surfaces magnifyingglass while "magnifyingglass" still wins exact.
+  const queries = [query, ...synonymTargets(query)]
   const matches: IconMatch[] = []
   for (const name of names) {
-    const score = scoreIconName(query, name)
+    let score = 0
+    for (const q of queries) {
+      const s = scoreIconName(q, name)
+      if (s > score) score = s
+    }
     if (score > 0) matches.push({ name, score })
   }
   matches.sort((a, b) => b.score - a.score || a.name.length - b.name.length || a.name.localeCompare(b.name))

@@ -77,6 +77,28 @@ describe('scoreIcons ranking', () => {
   })
 })
 
+describe('natural-language search (#25)', () => {
+  it('matches a spaced query to its concatenated SF token, beating 1-letter garbage', () => {
+    // "magnifying glass" previously surfaced g.circle/g.square (the word "glass"
+    // prefix-matching the 1-letter token "g") instead of magnifyingglass.
+    const real = scoreIconName('magnifying glass', 'magnifyingglass')
+    const garbage = scoreIconName('magnifying glass', 'g.circle')
+    expect(real).toBeGreaterThan(garbage)
+    expect(garbage).toBe(0)
+  })
+
+  it('bridges word/dot boundaries ("chevron right" -> chevron.right)', () => {
+    expect(scoreIconName('chevron right', 'chevron.right')).toBeGreaterThan(0)
+  })
+
+  it('expands plain-English synonyms through scoreIcons', async () => {
+    const names = await iconNames('monochrome')
+    expect(scoreIcons('search', names, 12).some((m) => m.name === 'magnifyingglass')).toBe(true)
+    expect(scoreIcons('back', names, 12).some((m) => m.name === 'chevron.left')).toBe(true)
+    expect(scoreIcons('location pin', names, 12).some((m) => m.name === 'mappin')).toBe(true)
+  }, 20_000)
+})
+
 describe('registry-backed search', () => {
   it('enumerates resolvable Apple names', async () => {
     const names = await iconNames('monochrome')
