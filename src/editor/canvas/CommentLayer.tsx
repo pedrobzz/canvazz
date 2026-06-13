@@ -33,7 +33,12 @@ export function CommentLayer() {
     () => editorStore.ui.commentDraft,
   )
   const activePageId = editorStore.doc.activePageId
-  const threads = (editorStore.doc.comments ?? []).filter((t) => t.pageId === activePageId)
+  // migrateDocument normalizes legacy/partial comments on load; the messages
+  // guard is a belt-and-suspenders so one malformed record can never crash the
+  // whole layer (e.g. an in-memory doc not yet re-migrated after HMR).
+  const threads = (editorStore.doc.comments ?? []).filter(
+    (t) => t.pageId === activePageId && Array.isArray(t.messages) && t.messages.length > 0,
+  )
   const active = threads.find((t) => t.id === activeCommentId)
 
   return (

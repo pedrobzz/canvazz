@@ -24,6 +24,34 @@ describe('comments — document defaults & migration', () => {
     delete (doc as { comments?: unknown }).comments
     expect(migrateDocument(doc).comments).toEqual([])
   })
+
+  it('migrateDocument repairs legacy flat-pin comments (no messages array)', () => {
+    const doc = emptyDocument('d', 'T')
+    // Shape persisted by the first (removed) comment experiment — no messages.
+    ;(doc as { comments: unknown[] }).comments = [
+      { id: 'c_old', nodeId: 'n1', x: 10, y: 20, author: 'You', body: 'old note', createdAt: 111, resolved: true },
+    ]
+    const repaired = migrateDocument(doc).comments!
+    expect(repaired).toHaveLength(1)
+    expect(repaired[0]).toMatchObject({
+      id: 'c_old', x: 10, y: 20, nodeIds: ['n1'], resolved: true, pageId: 'page_1',
+    })
+    expect(repaired[0].messages).toHaveLength(1)
+    expect(repaired[0].messages[0]).toMatchObject({ author: 'user', body: 'old note', createdAt: 111 })
+  })
+
+  it('migrateDocument drops junk comment entries and keeps valid threads', () => {
+    const doc = emptyDocument('d', 'T')
+    ;(doc as { comments: unknown[] }).comments = [
+      null,
+      'nope',
+      { id: 'c_ok', pageId: 'page_1', x: 0, y: 0, nodeIds: [], resolved: false, createdAt: 1,
+        messages: [{ id: 'm1', author: 'user', body: 'hi', createdAt: 1 }] },
+    ]
+    const repaired = migrateDocument(doc).comments!
+    expect(repaired).toHaveLength(1)
+    expect(repaired[0].id).toBe('c_ok')
+  })
 })
 
 describe('comments — thread lifecycle through the store', () => {

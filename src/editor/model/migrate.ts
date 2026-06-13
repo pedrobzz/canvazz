@@ -2,7 +2,9 @@ import { genId } from './ids'
 import {
   COMPONENT_SET_PAD, COMPONENT_SET_PAD_TOP, componentSetStyle,
 } from './instances'
-import type { DocumentModel, NodeId, NodeModel, PageModel } from './types'
+import type {
+  CommentMessage, CommentThread, DocumentModel, NodeId, NodeModel, PageModel,
+} from './types'
 
 /**
  * Forward-only document migrations. Each step upgrades the doc in place to the
@@ -18,8 +20,54 @@ export function migrateDocument(doc: DocumentModel): DocumentModel {
   // Additive fields, no schema bump: ensure the optional flows/comments
   // collections exist so reads/writes never special-case a missing array.
   if (!d.flows) d = { ...d, flows: [] }
-  if (!d.comments) d = { ...d, comments: [] }
+  d = { ...d, comments: normalizeComments(d) }
   return d
+}
+
+/**
+ * Bring every comment to the current thread shape. Documents saved while the
+ * first (removed) comment experiment was live persist `comments` as flat pins —
+ * `{ id, nodeId, author, body, resolved }` with no `messages` array — which the
+ * thread UI would crash on. Repair those (and any partial thread) into a real
+ * `CommentThread`: synthesize the opening message from the legacy body, lift
+ * `nodeId` into `nodeIds`, and backfill `pageId`/coordinates. Idempotent: a
+ * well-formed thread passes through unchanged. Junk (non-objects) is dropped.
+ */
+function normalizeComments(doc: DocumentModel): CommentThread[] {
+  const raw = doc.comments
+  if (!Array.isArray(raw)) return []
+  const fallbackPageId = doc.activePageId ?? doc.pages[0]?.id ?? ''
+  const out: CommentThread[] = []
+  for (const c of raw as unknown[]) {
+    if (!c || typeof c !== 'object') continue
+    const t = c as Record<string, unknown>
+    const messages: CommentMessage[] =
+      Array.isArray(t.messages) && t.messages.length > 0
+        ? (t.messages as CommentMessage[])
+        : [{
+            id: genId('msg'),
+            author: t.author === 'agent' ? 'agent' : 'user',
+            body: typeof t.body === 'string' ? t.body : '',
+            createdAt: typeof t.createdAt === 'number' ? t.createdAt : Date.now(),
+          }]
+    const nodeIds = Array.isArray(t.nodeIds)
+      ? (t.nodeIds as NodeId[])
+      : typeof t.nodeId === 'string'
+        ? [t.nodeId]
+        : []
+    out.push({
+      id: typeof t.id === 'string' ? t.id : genId('cmt'),
+      pageId: typeof t.pageId === 'string' ? t.pageId : fallbackPageId,
+      x: typeof t.x === 'number' ? t.x : 0,
+      y: typeof t.y === 'number' ? t.y : 0,
+      nodeIds,
+      ...(t.area && typeof t.area === 'object' ? { area: t.area as CommentThread['area'] } : {}),
+      messages,
+      resolved: Boolean(t.resolved),
+      createdAt: typeof t.createdAt === 'number' ? t.createdAt : Date.now(),
+    })
+  }
+  return out
 }
 
 /**

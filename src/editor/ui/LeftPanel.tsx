@@ -495,7 +495,11 @@ function goToThread(thread: CommentThread) {
  */
 function CommentsPanel() {
   useDocVersion()
-  const threads = editorStore.doc.comments ?? []
+  // Guard against a malformed/legacy record (no messages) crashing the list;
+  // migrateDocument repairs these on load, this is the in-memory safety net.
+  const threads = (editorStore.doc.comments ?? []).filter(
+    (t) => Array.isArray(t.messages) && t.messages.length > 0,
+  )
   const open = threads.filter((t) => !t.resolved)
   const resolved = threads.filter((t) => t.resolved)
 
