@@ -13,6 +13,26 @@ const LINK_ATTR = 'data-cz-font'
 
 export const DEFAULT_WEIGHTS = [400, 500, 600, 700]
 
+/**
+ * Families installed on the host OS (the app runs on macOS). These resolve
+ * from local glyphs with no network load, so they register as `source: 'system'`
+ * rather than being routed to Google Fonts. Matching is case-insensitive.
+ */
+export const SYSTEM_FONTS = [
+  'system-ui', 'ui-sans-serif', 'ui-serif', 'ui-monospace', 'ui-rounded',
+  'SF Pro', 'SF Pro Display', 'SF Pro Text', 'SF Pro Rounded', 'SF Compact',
+  'SF Mono', 'New York', 'Menlo', 'Monaco',
+  'Helvetica', 'Helvetica Neue', 'Arial', 'Avenir', 'Avenir Next',
+  'Times', 'Times New Roman', 'Georgia', 'Courier', 'Courier New',
+  'Geneva', 'Verdana',
+]
+
+const SYSTEM_FONT_SET = new Set(SYSTEM_FONTS.map((f) => f.toLowerCase()))
+
+export function isSystemFont(family: string): boolean {
+  return SYSTEM_FONT_SET.has(family.trim().toLowerCase())
+}
+
 export function isValidFamily(family: string): boolean {
   return FAMILY_RE.test(family.trim())
 }

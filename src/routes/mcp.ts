@@ -255,7 +255,7 @@ server.registerTool('add_font', {
     'Load a Google Fonts family into the document (undoable). Returns loaded=false if the family does not exist.',
   inputSchema: {
     project,
-    family: z.string().min(1).max(60).describe('e.g. "Space Grotesk"'),
+    family: z.string().min(1).max(60).describe('e.g. "Space Grotesk". Host fonts (SF Pro Display, SF Pro Text, Menlo, system-ui, …) load from the OS — no Google fetch.'),
     weights: z.array(z.number()).optional().describe('Default [400, 500, 600, 700]'),
   },
 }, forward('add_font', 30_000))

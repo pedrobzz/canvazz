@@ -14,7 +14,7 @@ import {
 } from '../components/componentCommands'
 import { sfSymbolMarkup } from '@/components/SFSymbol'
 import { ensureIconRegistries } from '../iconResolver'
-import { DEFAULT_WEIGHTS, isValidFamily, syncDocumentFonts, verifyFontLoaded } from '../fonts'
+import { DEFAULT_WEIGHTS, isSystemFont, isValidFamily, SYSTEM_FONTS, syncDocumentFonts, verifyFontLoaded } from '../fonts'
 import { genId } from '../model/ids'
 import { createArtboard } from '../model/factory'
 import { editorStore } from '../store/editorStore'
@@ -569,8 +569,8 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   get_fonts() {
     return {
       documentFonts: store.doc.fonts ?? {},
-      builtin: ['system-ui', 'Arial', 'Helvetica Neue', 'Georgia', 'Times New Roman', 'Courier New', 'Menlo'],
-      usage: 'Reference document fonts as font-family: \'<Family>\', sans-serif. Add new ones with add_font.',
+      builtin: SYSTEM_FONTS,
+      usage: 'Reference document fonts as font-family: \'<Family>\', sans-serif. Add new ones with add_font (host system fonts like SF Pro Display / Menlo load from the OS, others from Google Fonts).',
     }
   },
 
@@ -580,13 +580,19 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     const weights = Array.isArray(args.weights) && args.weights.length > 0
       ? (args.weights as number[]).filter((w) => Number.isFinite(w))
       : DEFAULT_WEIGHTS
+    // Host OS fonts (SF Pro, Menlo, …) resolve from local glyphs — register
+    // them as `system` so nothing is fetched from Google.
+    const source = isSystemFont(family) ? 'system' : 'google'
     store.apply(`AI: add font ${family}`, [
-      { t: 'setFont', family, font: { family, weights, source: 'google' } },
+      { t: 'setFont', family, font: { family, weights, source } },
     ], 'ai')
     syncDocumentFonts(store.doc)
-    const loaded = await verifyFontLoaded(family)
-    return { ok: true, family, weights, loaded, undoable: true,
-      hint: loaded ? `Use font-family: '${family}', sans-serif` : 'Family not found on Google Fonts (kept in the document; verify the name)' }
+    const loaded = source === 'system' ? true : await verifyFontLoaded(family)
+    return { ok: true, family, weights, source, loaded, undoable: true,
+      hint: source === 'system'
+        ? `Host font — use font-family: '${family}', sans-serif`
+        : loaded ? `Use font-family: '${family}', sans-serif`
+                 : 'Family not found on Google Fonts (kept in the document; verify the name)' }
   },
 
   select_nodes(args) {
