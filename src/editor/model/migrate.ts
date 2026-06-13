@@ -15,6 +15,9 @@ export const SCHEMA_VERSION = 2
 export function migrateDocument(doc: DocumentModel): DocumentModel {
   let d = doc
   if ((d.schemaVersion ?? 1) < 2) d = migrateV1toV2(d)
+  // Additive field, no schema bump: ensure the optional flows collection exists
+  // so reads/writes never have to special-case a missing array.
+  if (!d.flows) d = { ...d, flows: [] }
   return d
 }
 

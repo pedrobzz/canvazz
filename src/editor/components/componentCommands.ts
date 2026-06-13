@@ -271,14 +271,24 @@ export function deleteComponent(ctx: Ctx, componentId: string): { ok: true } | {
   if (!def) return { ok: false, reason: `Unknown component: ${componentId}` }
 
   const set = def.setId ? store.doc.componentSets[def.setId] : null
+  // Live instances block deletion regardless of variant structure, so they are
+  // reported FIRST with their ids — detaching them is the real unblock. An
+  // instance of any variant in the set still renders this definition's subtree.
+  const blockedBy = new Set(set ? set.variantIds : [componentId])
+  const dependents = Object.values(store.doc.nodes).filter(
+    (n) => n.componentId && blockedBy.has(n.componentId),
+  )
+  if (dependents.length > 0) {
+    const ids = dependents.map((n) => n.id)
+    return {
+      ok: false,
+      reason: `${ids.length} instance${ids.length > 1 ? 's' : ''} depend on this component: ${ids.join(', ')} — delete or detach them first.`,
+    }
+  }
   const isBaseWithVariants =
     set && set.variantIds.length > 1 && (set.defaultVariantId === componentId || set.variantIds[0] === componentId)
   if (isBaseWithVariants) {
     return { ok: false, reason: 'Delete the other variants first — this is the base definition of a set.' }
-  }
-  const dependents = Object.values(store.doc.nodes).filter((n) => n.componentId === componentId)
-  if (dependents.length > 0) {
-    return { ok: false, reason: `${dependents.length} instance(s) still use this component — detach or delete them first.` }
   }
 
   const ops: Op[] = []
@@ -340,6 +350,20 @@ export function detachInstance(ctx: Ctx, instanceId: NodeId): NodeId | null {
   return rootId
 }
 
+/**
+ * A definition node renders an SF Symbol when it is an <svg> stamped with the
+ * data-cz-icon round-trip marker (added by sfSymbolMarkup / insert_icon). Only
+ * such nodes accept a per-instance icon swap.
+ */
+export function isIconNode(node: NodeModel | undefined): boolean {
+  return Boolean(node && node.tag === 'svg' && typeof node.attrs['data-cz-icon'] === 'string')
+}
+
+/** Locate the definition node addressed by a (possibly variant-clone) source id. */
+function defNode(store: EditorStore, sourceId: NodeId): NodeModel | undefined {
+  return store.doc.nodes[sourceId] ?? store.doc.nodes[canonicalSourceId(store.doc, sourceId)]
+}
+
 /** Sanitized override write (text/style/classes/attrs/visible/swap). */
 export function setInstanceOverride(
   ctx: Ctx,
@@ -368,6 +392,37 @@ export function setInstanceOverride(
     { t: 'setOverride', id: instanceId, sourceId, patch: safe },
   ], src(ctx))
   return true
+}
+
+/**
+ * Swap the glyph an icon node renders, per instance. Stored as a data-cz-icon
+ * attrs override; instance expansion regenerates the vector content from the
+ * registry, so each instance can show a different SF Symbol while staying
+ * linked to the component. The caller must have warmed the icon registry (so
+ * the synchronous resolver in expansion has the glyph) and validated the name.
+ */
+export function setInstanceIconOverride(
+  ctx: Ctx,
+  instanceId: NodeId,
+  sourceId: NodeId,
+  symbol: string,
+  variant?: string,
+): { ok: true } | { ok: false; reason: string } {
+  const { store } = ctx
+  const instance = store.doc.nodes[instanceId]
+  if (!instance?.componentId) return { ok: false, reason: `${instanceId} is not a component instance` }
+  const target = defNode(store, sourceId)
+  if (!target) return { ok: false, reason: `Unknown override target: ${sourceId}` }
+  if (!isIconNode(target)) {
+    return { ok: false, reason: `${sourceId} is not an icon node (an <svg> placed via insert_icon); icon overrides only apply to icons` }
+  }
+  const canonical = canonicalSourceId(store.doc, sourceId)
+  const attrs: Record<string, string> = { 'data-cz-icon': symbol }
+  if (variant) attrs['data-cz-variant'] = variant
+  store.apply('Override instance icon', [
+    { t: 'setOverride', id: instanceId, sourceId: canonical, patch: { attrs } },
+  ], src(ctx))
+  return { ok: true }
 }
 
 export function setInstanceVariant(ctx: Ctx, instanceId: NodeId, variantId: string): boolean {

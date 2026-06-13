@@ -268,13 +268,51 @@ function applyOp(draft: Draft, op: Op): Op {
       // Assets are content-addressed blobs; undo keeps them (harmless, stable refs).
       return { t: 'addAsset', asset: op.asset }
     }
+    case 'setFlow': {
+      const flows = draft.doc.flows ?? []
+      const index = flows.findIndex((f) => f.id === op.flow.id)
+      const prev = index >= 0 ? flows[index] : null
+      const next = [...flows]
+      if (index >= 0) next[index] = op.flow
+      else next.push(op.flow)
+      draft.doc.flows = next
+      return prev ? { t: 'setFlow', flow: prev } : { t: 'removeFlow', id: op.flow.id }
+    }
+    case 'removeFlow': {
+      const flows = draft.doc.flows ?? []
+      const prev = flows.find((f) => f.id === op.id)
+      if (!prev) throw new Error(`Unknown flow: ${op.id}`)
+      draft.doc.flows = flows.filter((f) => f.id !== op.id)
+      return { t: 'setFlow', flow: prev }
+    }
   }
+}
+
+/**
+ * Flow links whose endpoints (from/to) intersect a just-removed set of node
+ * ids — they are dangling and must be cleaned so the doc stays consistent.
+ */
+function danglingFlows(doc: DocumentModel, removed: ReadonlySet<NodeId>): NodeId[] {
+  return (doc.flows ?? []).filter((f) => removed.has(f.fromId) || removed.has(f.toId)).map((f) => f.id)
 }
 
 export function applyOps(doc: DocumentModel, ops: Op[]): ApplyResult {
   const draft = new Draft(doc)
   const inverse: Op[] = []
-  for (const op of ops) inverse.push(applyOp(draft, op))
+  for (const op of ops) {
+    const inv = applyOp(draft, op)
+    inverse.push(inv)
+    // Cleanup pass: a remove's inverse is an insertTree carrying the whole
+    // removed subtree, so it tells us exactly which node ids vanished. Drop any
+    // flow links that referenced them, folding the cleanup (and its undo) into
+    // the same transaction so deleting an endpoint keeps the doc consistent.
+    if (op.t === 'remove' && inv.t === 'insertTree') {
+      const removed = new Set(inv.nodes.map((n) => n.id))
+      for (const flowId of danglingFlows(draft.doc, removed)) {
+        inverse.push(applyOp(draft, { t: 'removeFlow', id: flowId }))
+      }
+    }
+  }
   inverse.reverse()
   return { doc: draft.doc, inverse, changed: [...draft.changed] }
 }
@@ -294,5 +332,6 @@ export function emptyDocument(id: string, name: string): DocumentModel {
     tokens: {},
     fonts: {},
     assets: {},
+    flows: [],
   }
 }

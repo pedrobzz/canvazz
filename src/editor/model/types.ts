@@ -106,6 +106,20 @@ export interface AssetModel {
   url: string
 }
 
+/**
+ * A prototype flow link between two nodes (usually artboards): "this card,
+ * when tapped, opens the Detail screen". Model-only — canvas arrow rendering
+ * is a later, optional concern. Links are removed when either endpoint node
+ * is deleted, so the collection stays consistent.
+ */
+export interface FlowLink {
+  id: string
+  fromId: NodeId
+  toId: NodeId
+  trigger: 'tap' | 'hover'
+  label?: string
+}
+
 export interface DocumentModel {
   id: string
   name: string
@@ -120,6 +134,8 @@ export interface DocumentModel {
   /** Fonts available to the document, keyed by family name. */
   fonts: Record<string, FontModel>
   assets: Record<string, AssetModel>
+  /** Prototype flow links between nodes. Optional for back-compat. */
+  flows?: FlowLink[]
 }
 
 /** Where a node lives: under another node, or at the top level of a page. */
@@ -149,6 +165,8 @@ export type Op =
   | { t: 'removePage'; id: string }
   | { t: 'setPageName'; id: string; name: string }
   | { t: 'addAsset'; asset: AssetModel }
+  | { t: 'setFlow'; flow: FlowLink }
+  | { t: 'removeFlow'; id: string }
 
 export interface NodePropsPatch {
   name?: string

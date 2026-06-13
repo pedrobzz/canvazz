@@ -11,17 +11,19 @@ import {
 } from '../commands'
 import {
   createInstance, createMainComponent, createVariant, deleteComponent,
-  detachInstance, setInstanceOverride, setInstanceVariant,
+  detachInstance, setInstanceIconOverride, setInstanceOverride, setInstanceVariant,
 } from '../components/componentCommands'
 import { sfSymbolMarkup } from '@/components/SFSymbol'
 import { ensureIconRegistries } from '../iconResolver'
 import { closestIconNames, iconNames, scoreIcons } from '../iconResolver'
+import { buildChart } from '../charts'
+import type { ChartDatum, ChartType } from '../charts'
 import { DEFAULT_WEIGHTS, isSystemFont, isValidFamily, SYSTEM_FONTS, syncDocumentFonts, verifyFontLoaded } from '../fonts'
 import { genId } from '../model/ids'
 import { createArtboard } from '../model/factory'
 import { editorStore } from '../store/editorStore'
 import type { EditorStore } from '../store/editorStore'
-import type { NodeId, NodeLocation, NodeModel, Op } from '../model/types'
+import type { FlowLink, NodeId, NodeLocation, NodeModel, Op } from '../model/types'
 
 /**
  * Browser-side executors for MCP tools. Every mutation goes through the
@@ -136,6 +138,9 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
         id: s.id, name: s.name, nodeId: s.nodeId, variantIds: s.variantIds, defaultVariantId: s.defaultVariantId,
       })),
       tokens: store.doc.tokens,
+      flows: (store.doc.flows ?? []).map((f) => ({
+        id: f.id, fromId: f.fromId, toId: f.toId, trigger: f.trigger, label: f.label,
+      })),
       selection: store.ui.selection,
       camera: cameraStore.camera,
       hints: [
@@ -551,7 +556,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     return { ok: true, deleted: componentId, undoable: true }
   },
 
-  set_instance_overrides(args) {
+  async set_instance_overrides(args) {
     const instanceId = args.instanceId as string
     const instance = requireNode(instanceId)
     if (!instance.componentId) throw new Error(`${instanceId} is not a component instance`)
@@ -561,7 +566,25 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       }
     }
     const overrides = (args.overrides as Record<string, Json> | undefined) ?? {}
+    // Per-instance icon swaps regenerate the glyph from the registry during
+    // expansion (which is synchronous), so warm it once before applying any.
+    if (Object.values(overrides).some((o) => o.icon !== undefined)) {
+      await ensureIconRegistries()
+    }
     for (const [sourceId, o] of Object.entries(overrides)) {
+      if (o.icon !== undefined) {
+        const symbol = String(o.icon).trim()
+        if (!symbol) throw new Error(`Empty icon for ${sourceId}`)
+        const variant = o.variant !== undefined ? String(o.variant) : undefined
+        // Validate the symbol exists before storing the override.
+        const probe = await sfSymbolMarkup(symbol, { variant: variant === 'dualtone' ? 'dualtone' : 'monochrome' })
+        if (!probe) {
+          throw new Error(`Unknown SF Symbol: "${symbol}". Use Apple names like "heart.fill", "star", "bolt.fill".`)
+        }
+        const res = setInstanceIconOverride({ ...AI }, instanceId, sourceId, symbol, variant)
+        if (!res.ok) throw new Error(res.reason)
+        continue
+      }
       const ok = setInstanceOverride({ ...AI }, instanceId, sourceId, {
         text: o.text !== undefined ? String(o.text) : undefined,
         style: o.style as Record<string, string> | undefined,
@@ -830,6 +853,72 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
         : 'Pass any name to insert_icon. Names are exact Apple SF Symbol names.',
     }
   },
+
+  // --- Appended executors (#18, #19) --------------------------------------
+
+  insert_chart(args) {
+    const type = String(args.type ?? 'bar') as ChartType
+    if (!['bar', 'line', 'sparkline', 'donut'].includes(type)) {
+      throw new Error(`Unknown chart type: ${type}. Use bar | line | sparkline | donut.`)
+    }
+    const raw = args.data
+    if (!Array.isArray(raw) || raw.length === 0) throw new Error('data is required: number[] or {label,value}[]')
+    const data = raw.map((d) =>
+      typeof d === 'number'
+        ? d
+        : { label: (d as Json).label as string | undefined, value: Number((d as Json).value) || 0 },
+    ) as number[] | ChartDatum[]
+
+    const { markup, name } = buildChart({
+      type,
+      data,
+      width: args.width as number | undefined,
+      height: args.height as number | undefined,
+      color: args.color as string | undefined,
+      trackColor: args.trackColor as string | undefined,
+      labels: args.labels as boolean | undefined,
+    })
+
+    const at = positionedLocation(args)
+    const { rootIds, dropped } = insertHtml({ ...AI }, markup, at, `AI: insert ${type} chart`)
+    if (rootIds.length === 0) throw new Error(`Chart markup rejected: ${dropped.join(', ')}`)
+    // Free-floating charts (no container) anchor at the requested x/y.
+    if (!chartTargetId(args) && (args.x !== undefined || args.y !== undefined)) {
+      store.apply('AI: position chart', [{
+        t: 'setStyle', id: rootIds[0],
+        set: { position: 'absolute', left: `${Number(args.x) || 0}px`, top: `${Number(args.y) || 0}px` },
+      }], 'ai')
+    }
+    store.setSelection(rootIds)
+    return { ...mutationResult('insert_chart', rootIds), chart: name, dropped }
+  },
+
+  link_artboards(args) {
+    const fromId = String(args.fromId ?? '')
+    const toId = String(args.toId ?? '')
+    requireNode(fromId)
+    requireNode(toId)
+    if (fromId === toId) throw new Error('A flow link cannot connect a node to itself')
+    const trigger = args.trigger === 'hover' ? 'hover' : 'tap'
+    const label = args.label !== undefined ? String(args.label).slice(0, 120) : undefined
+    // Collapse duplicates: one from→to link, latest trigger/label wins.
+    const existing = (store.doc.flows ?? []).find((f) => f.fromId === fromId && f.toId === toId)
+    const flow: FlowLink = { id: existing?.id ?? genId('flow'), fromId, toId, trigger, ...(label ? { label } : {}) }
+    store.apply('AI: link artboards', [{ t: 'setFlow', flow }], 'ai')
+    return { ok: true, link: flow, undoable: true }
+  },
+
+  unlink_artboards(args) {
+    const flows = store.doc.flows ?? []
+    const linkId = args.linkId as string | undefined
+    let target = linkId ? flows.find((f) => f.id === linkId) : undefined
+    if (!target && args.fromId && args.toId) {
+      target = flows.find((f) => f.fromId === String(args.fromId) && f.toId === String(args.toId))
+    }
+    if (!target) throw new Error('No matching flow link (pass linkId, or fromId + toId)')
+    store.apply('AI: unlink artboards', [{ t: 'removeFlow', id: target.id }], 'ai')
+    return { ok: true, removed: target.id, undoable: true }
+  },
 }
 
 export interface CaptureRegion {
@@ -976,6 +1065,22 @@ function normalizeIconRequest(it: Json, defaults: Json): IconRequest {
     y: it.y !== undefined ? Number(it.y) || 0 : undefined,
     index: it.index !== undefined ? Number(it.index) : undefined,
   }
+}
+
+/** insert_chart container target (parent node id), if any. */
+function chartTargetId(args: Json): string | undefined {
+  return (args.targetId as string | undefined) ?? (args.targetName as string | undefined ? findByName(String(args.targetName)) : undefined)
+}
+
+function findByName(name: string): string | undefined {
+  const lower = name.toLowerCase()
+  return Object.values(store.doc.nodes).find((n) => n.name.toLowerCase() === lower)?.id
+}
+
+/** Resolve insert_chart placement: into a named/id'd slot, else the page. */
+function positionedLocation(args: Json): NodeLocation {
+  const target = chartTargetId(args)
+  return locationFor(target, args.index as number | undefined)
 }
 
 function collectFrom(nodes: NodeModel[], rootId: string): NodeModel[] {

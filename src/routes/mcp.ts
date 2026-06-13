@@ -425,24 +425,26 @@ server.registerTool('detach_instance', {
 server.registerTool('delete_component', {
   title: 'Delete a component or variant',
   description:
-    'Remove a component definition and its Design System subtree. Refuses while instances depend on it; instances switched to a deleted variant fall back to the base.',
+    'Remove a component definition and its Design System subtree. Refuses while live instances depend on it, listing the blocking instance ids first (detach or delete those, then retry); otherwise a base-of-a-set requires removing its other variants first. Instances switched to a deleted variant fall back to the base.',
   inputSchema: { project, componentId: z.string().min(1) },
 }, forward('delete_component'))
 
 server.registerTool('set_instance_overrides', {
   title: 'Override a component instance',
   description:
-    'Per-instance overrides keyed by definition-node id: text, style, classes, visible, attrs, or nested swap (componentId/variantId). Also switches the instance variant via variantId at the top level.',
+    'Per-instance overrides keyed by definition-node id: text, style (var(--token) values welcome — live-updating), classes, visible, attrs, per-instance icon swap (icon: "sf.symbol.name" on an icon node, so 4 instances of one card can show 4 different SF Symbols), or nested swap (componentId/variantId). Also switches the instance variant via variantId at the top level.',
   inputSchema: {
     project,
     instanceId: z.string(),
     variantId: z.string().optional().describe('Switch the instance to this variant'),
     overrides: z.record(z.string(), z.object({
       text: z.string().optional(),
-      style: z.record(z.string(), z.string()).optional(),
+      style: z.record(z.string(), z.string()).optional().describe('var(--token) values supported, sanitized like update_styles'),
       classes: z.array(z.string()).optional(),
       visible: z.boolean().optional(),
       attrs: z.record(z.string(), z.string()).optional(),
+      icon: z.string().optional().describe('SF Symbol name to render on this instance only (target node must be an icon)'),
+      variant: z.enum(['monochrome', 'dualtone']).optional().describe('Icon variant for the icon swap'),
       componentId: z.string().optional(),
       variantId: z.string().optional(),
     })).optional(),
@@ -508,6 +510,58 @@ server.registerTool('search_icons', {
     limit: z.number().int().optional().describe('Max matches, default 12, max 50'),
   },
 }, forward('search_icons'))
+
+// --- Charts (#18) -----------------------------------------------------------
+
+server.registerTool('insert_chart', {
+  title: 'Insert a data chart',
+  description:
+    'Generate a chart from raw values as ordinary, restylable canvas nodes (div bars / one SVG line path / SVG donut arcs) — a pure generator, not a widget. Auto-scales to the data range and handles zero/negative/single-point. e.g. [3,5,2,8,6,7,4] → a scaled bar chart. Place into a named slot (targetName) or by id (targetId), or free at x/y.',
+  inputSchema: {
+    project,
+    type: z.enum(['bar', 'line', 'sparkline', 'donut']).describe('Chart kind'),
+    data: z.array(z.union([
+      z.number(),
+      z.object({ label: z.string().optional(), value: z.number() }),
+    ])).min(1).describe('number[] or {label,value}[]'),
+    width: z.number().positive().optional().describe('px, default 240'),
+    height: z.number().positive().optional().describe('px, default 140'),
+    color: z.string().optional().describe('Series/fill color (CSS color or var(--token))'),
+    trackColor: z.string().optional().describe('Donut unfilled-track color'),
+    labels: z.boolean().optional().describe('Show value/category labels where supported'),
+    targetId: z.string().optional().describe('Container node id'),
+    targetName: z.string().optional().describe('Container by layer name'),
+    x: z.number().optional(), y: z.number().optional(),
+    index: z.number().int().optional(),
+  },
+}, forward('insert_chart'))
+
+// --- Flows (#19) ------------------------------------------------------------
+
+server.registerTool('link_artboards', {
+  title: 'Link two artboards (prototype flow)',
+  description:
+    'Record a prototype flow link "from this node, on tap/hover, go to that artboard". Persisted, undoable, and surfaced in get_basic_info under flows; removed automatically when either endpoint is deleted. Re-linking the same from→to updates the existing link.',
+  inputSchema: {
+    project,
+    fromId: z.string().describe('Source node id (a card, button, or artboard)'),
+    toId: z.string().describe('Destination node id (usually an artboard)'),
+    trigger: z.enum(['tap', 'hover']).optional().describe('Default tap'),
+    label: z.string().max(120).optional().describe('Optional human label for the flow'),
+  },
+}, forward('link_artboards'))
+
+server.registerTool('unlink_artboards', {
+  title: 'Remove a prototype flow link',
+  description:
+    'Delete a flow link by its id (linkId, from get_basic_info → flows) or by the fromId + toId pair.',
+  inputSchema: {
+    project,
+    linkId: z.string().optional().describe('Flow link id'),
+    fromId: z.string().optional().describe('Source node id (with toId)'),
+    toId: z.string().optional().describe('Destination node id (with fromId)'),
+  },
+}, forward('unlink_artboards'))
 
 export const Route = createFileRoute('/mcp')({
   server: {
