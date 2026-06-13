@@ -72,19 +72,45 @@ export function isAllowedAttr(name: string): boolean {
 
 const SAFE_URL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:'])
 
-/** Allows safe absolute URLs, relative paths, fragments, and data images. */
-export function sanitizeUrl(value: string): string | null {
+/** Inline data images the canvas can render without a network round-trip. */
+const DATA_IMAGE_RE = /^data:image\/(png|jpeg|jpg|gif|webp|avif|svg\+xml);base64,/i
+/** Local asset reference resolved by the asset pipeline (asset://<id>). */
+const ASSET_RE = /^asset:\/\/[\w-]+/i
+
+/**
+ * One url() policy for the whole sanitizer. Every place that accepts a URL —
+ * `<img src>`, `<a href>`, and every url(...) inside a CSS value — classifies
+ * through here so the rules never drift between shorthand and longhand.
+ *
+ * - `data:` images and `asset://<id>` refs are SAFE (no network dependency).
+ * - same-document `#fragment` refs (e.g. url(#grad)) are SAFE.
+ * - relative paths are SAFE.
+ * - external http(s) URLs are EXTERNAL (the canvas would depend on the network):
+ *   callers strip them from CSS and keep-with-warning on <img src>.
+ * - anything else (javascript:, data:text, vbscript:, …) is UNSAFE.
+ */
+export type UrlClass = 'safe' | 'external' | 'unsafe'
+
+export function classifyUrl(value: string): UrlClass {
   const trimmed = value.trim()
-  if (trimmed === '') return null
-  if (/^data:image\/(png|jpeg|jpg|gif|webp|avif);base64,/i.test(trimmed)) return trimmed
-  if (trimmed.startsWith('#') || trimmed.startsWith('/') || trimmed.startsWith('./')) return trimmed
+  if (trimmed === '') return 'unsafe'
+  if (DATA_IMAGE_RE.test(trimmed) || ASSET_RE.test(trimmed)) return 'safe'
+  if (trimmed.startsWith('#') || trimmed.startsWith('/') || trimmed.startsWith('./')) return 'safe'
   try {
     const url = new URL(trimmed)
-    return SAFE_URL_PROTOCOLS.has(url.protocol) ? trimmed : null
+    if (url.protocol === 'http:' || url.protocol === 'https:') return 'external'
+    return SAFE_URL_PROTOCOLS.has(url.protocol) ? 'safe' : 'unsafe'
   } catch {
     // Bare relative path without scheme.
-    return /^[\w][\w\-./?=&%#+ ]*$/.test(trimmed) ? trimmed : null
+    return /^[\w][\w\-./?=&%#+ ]*$/.test(trimmed) ? 'safe' : 'unsafe'
   }
+}
+
+/** Allows safe absolute URLs, relative paths, fragments, data images, assets. */
+export function sanitizeUrl(value: string): string | null {
+  const cls = classifyUrl(value)
+  // External http(s) is allowed for <img src> placeholders; the parser warns.
+  return cls === 'unsafe' ? null : value.trim()
 }
 
 export const URL_ATTRS = new Set(['src', 'href'])
@@ -121,6 +147,8 @@ export const ALLOWED_CSS_PROPS = new Set([
   'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color',
   'border-radius', 'border-top-left-radius', 'border-top-right-radius',
   'border-bottom-left-radius', 'border-bottom-right-radius',
+  'border-image', 'border-image-source', 'border-image-slice',
+  'border-image-width', 'border-image-outset', 'border-image-repeat',
   'outline', 'outline-offset', 'outline-width', 'outline-style', 'outline-color',
   'box-shadow', 'opacity', 'mix-blend-mode', 'isolation',
   'color', 'accent-color', 'caret-color',
@@ -131,7 +159,8 @@ export const ALLOWED_CSS_PROPS = new Set([
   'text-decoration-style', 'text-decoration-color', 'text-decoration-thickness',
   'text-transform', 'text-overflow', 'text-shadow', 'text-indent', 'text-wrap',
   'white-space', 'word-break', 'overflow-wrap', 'hyphens', 'vertical-align',
-  'list-style', 'list-style-type', 'list-style-position', '-webkit-line-clamp',
+  'list-style', 'list-style-type', 'list-style-position', 'list-style-image',
+  '-webkit-line-clamp',
   '-webkit-box-orient', '-webkit-background-clip', '-webkit-text-fill-color',
   // SVG presentation
   'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
@@ -145,14 +174,52 @@ export const ALLOWED_CSS_PROPS = new Set([
   'contain', 'content-visibility', 'container-type',
 ])
 
-/** Value-level rejects: expressions and external loads inside CSS values. */
-const FORBIDDEN_VALUE = /(expression\s*\(|javascript:|behavior\s*:|-moz-binding|@import|url\s*\(\s*(?!['"]?\s*(?:data:image\/|#|\/(?!\/)|\.\/|https:)))/i
+/** Value-level rejects: expressions and CSS-engine escapes. url() is handled
+ * separately by classifyUrl (see sanitizeCssUrls) so the policy stays uniform. */
+const FORBIDDEN_VALUE = /(expression\s*\(|javascript:|behavior\s*:|-moz-binding|@import)/i
 
 export function isSafeCssValue(value: string): boolean {
   if (value.length > 2000) return false
   if (FORBIDDEN_VALUE.test(value)) return false
   // Block control characters and angle brackets; allow normal CSS punctuation.
   return !/[\u0000-\u0008\u000B\u000C\u000E-\u001F<>]/.test(value)
+}
+
+/** Matches each url(...) token in a CSS value, capturing the inner reference. */
+const CSS_URL_RE = /url\s*\(\s*(['"]?)([^'")]*)\1\s*\)/gi
+
+/**
+ * Strip url() references the canvas must not load. Every url-bearing CSS
+ * property funnels through here — `background` shorthand, `background-image`,
+ * `mask-image`, `border-image`, `list-style-image`, etc. — so there is no gap
+ * between shorthand and longhand. `data:`/`asset://`/`#frag`/relative refs are
+ * kept verbatim; external http(s) and anything unsafe are removed and reported
+ * (`external` vs `unsafe`) for the caller's `dropped` list.
+ */
+export function sanitizeCssUrls(value: string): { value: string; dropped: UrlClass[] } {
+  const dropped: UrlClass[] = []
+  const out = value.replace(CSS_URL_RE, (match, _q: string, ref: string) => {
+    const cls = classifyUrl(ref)
+    if (cls === 'safe') return match
+    dropped.push(cls)
+    return ''
+  })
+  // Collapse leftover whitespace from a removed token inside a shorthand.
+  return { value: out.replace(/\s{2,}/g, ' ').trim(), dropped }
+}
+
+/**
+ * Property/value pairs that pass the allowlists but break the canvas layout
+ * model. `position: fixed | sticky` would escape the artboard's containing
+ * block, so they are rejected everywhere (parse-time + update_styles); agents
+ * are told to use `absolute`. Returns a reason when the pair is disallowed.
+ */
+export function cssValuePolicyReject(prop: string, value: string): string | null {
+  if (prop.toLowerCase().trim() === 'position') {
+    const v = value.trim().toLowerCase()
+    if (v === 'fixed' || v === 'sticky') return 'disallowed value — use absolute'
+  }
+  return null
 }
 
 export function isAllowedCssProp(prop: string): boolean {
