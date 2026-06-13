@@ -2,6 +2,7 @@ import { Link, createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { CanvasRoot } from '#/editor/canvas/CanvasRoot'
+import { CommentLayer } from '#/editor/canvas/CommentLayer'
 import { cameraStore } from '#/editor/canvas/camera'
 import { startBridge } from '#/editor/ai/bridgeClient'
 import '#/editor/iconResolver'
@@ -99,6 +100,7 @@ function EditorPage() {
           <LeftPanel />
           <div className="relative min-w-0 flex-1">
             <CanvasRoot />
+            <CommentLayer />
             <Toolbar />
           </div>
           <Inspector />
