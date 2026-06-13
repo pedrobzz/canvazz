@@ -185,8 +185,9 @@ server.registerTool('get_html', {
 
 server.registerTool('get_jsx', {
   title: 'Read node as JSX',
-  description: 'The subtree as a React component (className + camelCase style objects).',
-  inputSchema: { project, id },
+  description:
+    'The subtree as React components: className, camelCase style objects and SVG attributes, real component functions for instances, and no data-cz-* (set includeIds to keep them). Compiles under the React preset.',
+  inputSchema: { project, id, includeIds: z.boolean().optional().describe('Keep data-cz-id/name for re-import (stripped by default).') },
 }, forward('get_jsx'))
 
 server.registerTool('get_computed_styles', {
@@ -421,8 +422,15 @@ server.registerTool('select_nodes', {
 
 server.registerTool('export', {
   title: 'Export node as code',
-  description: 'Production HTML or JSX for a subtree. Lossless: re-importable with identical structure.',
-  inputSchema: { project, id, format: z.enum(['html', 'jsx']).optional() },
+  description:
+    'Production HTML or JSX for a subtree. JSX emits real components (one function per component definition, instances as <Name/>), camelCased SVG attributes, and no data-cz-* (set includeIds to keep them for re-import). standalone wraps the HTML in a full document with Google Fonts <link>s, a :root token block, and the Tailwind runtime so the file renders on its own. Imported assets resolve to their bytes (deduped for backgrounds, inlined for <img>).',
+  inputSchema: {
+    project,
+    id,
+    format: z.enum(['html', 'jsx']).optional(),
+    standalone: z.boolean().optional().describe('HTML only: wrap in a full <!doctype html> document (fonts, tokens, Tailwind) so it renders standalone.'),
+    includeIds: z.boolean().optional().describe('JSX only: keep data-cz-id/name for lossless re-import (stripped by default).'),
+  },
 }, forward('export'))
 
 server.registerTool('undo', {

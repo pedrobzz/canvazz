@@ -188,7 +188,8 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     const id = args.id as string
     requireNode(id)
     await ensureIconRegistries()
-    return { jsx: exportJsx(store.doc, id) }
+    // Production JSX: real components, camelCase SVG attrs, no data-cz-* unless asked.
+    return { jsx: exportJsx(store.doc, id, { ids: args.includeIds === true }) }
   },
 
   get_computed_styles(args) {
@@ -600,8 +601,13 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     requireNode(id)
     await ensureIconRegistries()
     const format = (args.format as string | undefined) ?? 'html'
-    if (format === 'jsx') return { format, code: exportJsx(store.doc, id) }
-    return { format: 'html', code: exportHtml(store.doc, id) }
+    if (format === 'jsx') {
+      // JSX strips data-cz-* by default (production noise); opt back in for re-import.
+      return { format, code: exportJsx(store.doc, id, { ids: args.includeIds === true }) }
+    }
+    // HTML keeps data-cz-* (its contract is lossless re-import); standalone wraps a doc.
+    const standalone = args.standalone === true
+    return { format: 'html', code: exportHtml(store.doc, id, { standalone }) }
   },
 
   undo() {
