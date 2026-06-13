@@ -103,12 +103,19 @@ server.registerTool('list_projects', {
   try {
     const { listProjectsQuery } = await import('#/server/projects')
     const open = new Set(connectedProjects())
-    const projects = (await listProjectsQuery()).map((p) => ({
-      id: p.id,
-      name: p.name,
-      updatedAt: new Date(p.updatedAt).toISOString(),
-      open: open.has(p.id),
-    }))
+    const projects = (await listProjectsQuery()).map((p) => {
+      const isOpen = open.has(p.id)
+      return {
+        id: p.id,
+        name: p.name,
+        updatedAt: new Date(p.updatedAt).toISOString(),
+        open: isOpen,
+        // A project is editable only once its tab's bridge stream is live. One
+        // leader tab per browser carries every project's stream, so this stays
+        // accurate no matter how many tabs are open (issue #3).
+        ...(isOpen ? {} : { reason: 'no live editor stream — open /p/<id> in the Canvazz app' }),
+      }
+    })
     return ok({
       projects,
       hint: 'Pass a project id (or unique name) as the `project` arg of every canvas tool. A project must be open in an editor tab to be edited: /p/<id> (default http://localhost:47823).',
