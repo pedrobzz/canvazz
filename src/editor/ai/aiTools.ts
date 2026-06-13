@@ -190,7 +190,8 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     const id = args.id as string
     requireNode(id)
     await ensureIconRegistries()
-    return { jsx: exportJsx(store.doc, id) }
+    // Production JSX: real components, camelCase SVG attrs, no data-cz-* unless asked.
+    return { jsx: exportJsx(store.doc, id, { ids: args.includeIds === true }) }
   },
 
   get_computed_styles(args) {
@@ -734,28 +735,46 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   async import_asset(args) {
-    const name = String(args.name ?? 'asset').slice(0, 80)
-    let dataUrl = args.dataUrl ? String(args.dataUrl) : ''
-    if (!dataUrl && args.url) {
+    // Accept a full data: URL, raw base64 + mime, or a fetchable remote url.
+    let url = typeof args.dataUrl === 'string' ? args.dataUrl : ''
+    const rawBase64 = typeof args.base64 === 'string' ? args.base64 : null
+    const mimeArg = typeof args.mime === 'string' ? args.mime : null
+    if (!url && rawBase64 && mimeArg) url = `data:${mimeArg};base64,${rawBase64}`
+    if (!url && args.url) {
       const res = await fetch(String(args.url))
       if (!res.ok) throw new Error(`Failed to fetch asset: HTTP ${res.status}`)
       const blob = await res.blob()
-      dataUrl = await new Promise<string>((resolve, reject) => {
+      url = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader()
         reader.onload = () => resolve(String(reader.result))
         reader.onerror = () => reject(new Error('Failed to read asset bytes'))
         reader.readAsDataURL(blob)
       })
     }
-    const match = /^data:([\w/+.-]+);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl)
-    if (!match) throw new Error('Provide an image as a base64 `dataUrl` (data:image/...;base64,...) or a fetchable `url`')
+    const match = /^data:([^;,]+)(;base64)?,/.exec(url)
+    if (!match) throw new Error('Provide an image as a data: URL (dataUrl), base64 + mime, or a fetchable url.')
     const mime = match[1]
     if (!mime.startsWith('image/')) throw new Error(`Unsupported asset type: ${mime} (images only)`)
-    const size = Math.floor((match[2].length * 3) / 4)
-    const id = genId('asset')
-    store.apply(`AI: import asset ${name}`, [{ t: 'addAsset', asset: { id, name, mime, size, url: dataUrl } }], 'ai')
-    return { ok: true, assetId: id, name, mime, size, url: dataUrl, undoable: true,
-      hint: 'Reference `url` in <img src="..."> or style="background-image: url(\'...\')".' }
+    // Byte count from the base64 payload (3 bytes per 4 chars, less padding).
+    const base64 = url.slice(url.indexOf(',') + 1)
+    const padding = (base64.match(/=+$/)?.[0].length) ?? 0
+    const bytes = Math.max(0, Math.floor((base64.length * 3) / 4) - padding)
+    const assetId = genId('asset')
+    const name = String(args.name ?? '').trim().slice(0, 80) || `asset.${mime.split('/')[1] ?? 'bin'}`
+    store.apply(`AI: import asset ${name}`, [
+      { t: 'addAsset', asset: { id: assetId, name, mime, size: bytes, url } },
+    ], 'ai')
+    const ref = `asset://${assetId}`
+    return {
+      ok: true,
+      assetId,
+      url: ref,
+      bytes,
+      mime,
+      name,
+      undoable: true,
+      hint: `Reference it by the short handle, e.g. <img src="${ref}"> or background-image: url(${ref}). The bytes are stored once; reuse the handle freely.`,
+    }
   },
 
   select_nodes(args) {
@@ -769,8 +788,13 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     requireNode(id)
     await ensureIconRegistries()
     const format = (args.format as string | undefined) ?? 'html'
-    if (format === 'jsx') return { format, code: exportJsx(store.doc, id) }
-    return { format: 'html', code: exportHtml(store.doc, id) }
+    if (format === 'jsx') {
+      // JSX strips data-cz-* by default (production noise); opt back in for re-import.
+      return { format, code: exportJsx(store.doc, id, { ids: args.includeIds === true }) }
+    }
+    // HTML keeps data-cz-* (its contract is lossless re-import); standalone wraps a doc.
+    const standalone = args.standalone === true
+    return { format: 'html', code: exportHtml(store.doc, id, { standalone }) }
   },
 
   undo() {
