@@ -1,5 +1,6 @@
 import { createElement, memo, useEffect, useRef, useSyncExternalStore } from 'react'
 import { styleToReact } from '../compiler/export'
+import { resolveAssetUrlsInline, resolveImgSrc } from '../compiler/assets'
 import { applyOverride, effectiveComponentRoot, overrideFor, stripPlacement } from '../model/instances'
 import { SFSymbol } from '@/components/SFSymbol'
 import type { SFVariant } from '@/components/SFSymbol'
@@ -49,7 +50,9 @@ interface RenderParts {
 }
 
 function buildProps(parts: RenderParts): Record<string, unknown> {
-  const style = styleToReact(parts.style) as CSSProperties & Record<string, string>
+  const doc = editorStore.doc
+  const style = styleToReact(resolveAssetStyles(doc, parts.style)) as CSSProperties &
+    Record<string, string>
   if (!parts.visible) style.display = 'none'
   if (parts.isArtboard || parts.isComponentSet) {
     // Isolate artboard / component-set layout/paint from the rest of the world.
@@ -62,7 +65,9 @@ function buildProps(parts: RenderParts): Record<string, unknown> {
   }
   if (parts.classes.length > 0) props.className = parts.classes.join(' ')
   for (const [key, value] of Object.entries(parts.attrs)) {
-    props[REACT_ATTR[key] ?? key] = value
+    // An <img src="asset://id"> renders the stored bytes; other attrs pass through.
+    const resolved = key === 'src' ? resolveImgSrc(doc, value) : value
+    props[REACT_ATTR[key] ?? key] = resolved
   }
   if (parts.tag === 'img') props.draggable = false
   // Interactive elements stay inert on the design surface.
@@ -80,6 +85,22 @@ function buildProps(parts: RenderParts): Record<string, unknown> {
 
 const preventDefault = (e: { preventDefault(): void }) => e.preventDefault()
 const noop = () => {}
+
+/** Swap `asset://id` handles inside any url() style value for their data URLs. */
+function resolveAssetStyles(
+  doc: typeof editorStore.doc,
+  style: Record<string, string>,
+): Record<string, string> {
+  let out: Record<string, string> | null = null
+  for (const [key, value] of Object.entries(style)) {
+    const resolved = resolveAssetUrlsInline(doc, value)
+    if (resolved !== value) {
+      out ??= { ...style }
+      out[key] = resolved
+    }
+  }
+  return out ?? style
+}
 
 export const NodeView = memo(function NodeView({ id }: { id: NodeId }) {
   const node = useNode(id)
