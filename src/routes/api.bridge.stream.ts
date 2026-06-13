@@ -7,9 +7,17 @@ export const Route = createFileRoute('/api/bridge/stream')({
   server: {
     handlers: {
       GET: ({ request }) => {
-        const projectId = new URL(request.url).searchParams.get('project')
-        if (!projectId) {
-          return Response.json({ error: 'project query param is required' }, { status: 400 })
+        const params = new URL(request.url).searchParams
+        // `projects` (comma-separated) is the leader-tab path covering every
+        // open project on one stream; `project` (singular) is kept for the
+        // single-tab / pre-mesh fallback and external callers.
+        const raw = params.get('projects') ?? params.get('project') ?? ''
+        const projectIds = [...new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))]
+        if (projectIds.length === 0) {
+          return Response.json(
+            { error: 'projects (or project) query param is required' },
+            { status: 400 },
+          )
         }
         const id = `client_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
         const encoder = new TextEncoder()
@@ -22,7 +30,7 @@ export const Route = createFileRoute('/api/bridge/stream')({
             }
             addBridgeClient({
               id,
-              projectId,
+              projectIds,
               send,
               close: () => controller.close(),
             })

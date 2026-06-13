@@ -1,8 +1,16 @@
 /**
  * Server side of the MCP <-> editor bridge. MCP tool calls are queued here,
- * pushed to the connected editor tab over SSE, executed against the live
- * document, and resolved with the editor's response. In-memory, single-user,
- * local-first — matching the dev-server deployment model.
+ * pushed to the connected editor over SSE, executed against the live document,
+ * and resolved with the editor's response. In-memory, single-user, local-first
+ * — matching the dev-server deployment model.
+ *
+ * One SSE client can now subscribe to MULTIPLE projects. The browser elects a
+ * single "leader" tab that holds one stream covering every project open across
+ * the browser, then fans each command out to the owning tab over a
+ * BroadcastChannel (see src/editor/ai/bridgeMesh.ts). This sidesteps the
+ * ~6-connections-per-host HTTP/1.1 limit that starved the 4th+ tab (issue #3).
+ * Dispatch is still addressed by project; the command payload carries its
+ * `project` so the leader knows which sibling tab to route it to.
  */
 
 interface Pending {
@@ -13,8 +21,8 @@ interface Pending {
 
 interface Client {
   id: string
-  /** Project open in this editor tab; MCP calls are routed by project. */
-  projectId: string
+  /** Projects this stream covers; MCP calls are routed by project. */
+  projectIds: string[]
   send: (event: string, data: string) => void
   close: () => void
 }
@@ -48,20 +56,20 @@ export function bridgeClientCount(): number {
   return clients.length
 }
 
-/** Project ids with a live editor tab, most recently connected last. */
+/** Project ids covered by a live stream, most recently connected last. */
 export function connectedProjects(): string[] {
-  return [...new Set(clients.map((c) => c.projectId))]
+  return [...new Set(clients.flatMap((c) => c.projectIds))]
 }
 
-/** Forward a tool call to the editor with that project open. */
+/** Forward a tool call to the editor stream covering that project. */
 export function dispatchToEditor(
   projectId: string,
   tool: string,
   args: unknown,
   timeoutMs = 20_000,
 ): Promise<unknown> {
-  // Most recent tab wins when the same project is open twice.
-  const client = [...clients].reverse().find((c) => c.projectId === projectId)
+  // Most recent stream wins when the same project is covered twice.
+  const client = [...clients].reverse().find((c) => c.projectIds.includes(projectId))
   if (!client) {
     const open = connectedProjects()
     return Promise.reject(
@@ -82,7 +90,8 @@ export function dispatchToEditor(
     }, timeoutMs)
     pending.set(id, { resolve, reject, timer })
     try {
-      client.send('command', JSON.stringify({ id, tool, args }))
+      // `project` lets the leader tab route the command to the owning sibling.
+      client.send('command', JSON.stringify({ id, project: projectId, tool, args }))
     } catch (err) {
       clearTimeout(timer)
       pending.delete(id)
