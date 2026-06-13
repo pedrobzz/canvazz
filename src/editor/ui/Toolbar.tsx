@@ -46,8 +46,8 @@ function ToolButton({ tool, icon: Icon, label, keyLabel }: {
           data-tool={tool}
           className={
             ui.tool === tool
-              ? 'bg-[var(--cz-accent)] text-white hover:bg-[var(--cz-accent)] hover:text-white'
-              : 'text-[var(--cz-panel-fg)] hover:bg-[var(--cz-panel-hover)] hover:text-white'
+              ? 'bg-(--cz-accent) text-white hover:bg-(--cz-accent) hover:text-white'
+              : 'text-(--cz-panel-fg) hover:bg-(--cz-panel-hover) hover:text-white'
           }
           onClick={() => editorStore.setTool(tool)}
         >
@@ -83,7 +83,7 @@ export function Toolbar() {
     <div
       data-cz-ui
       data-testid="toolbar"
-      className="cz-panel pointer-events-auto absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-[var(--cz-panel-border)] p-1 shadow-xl"
+      className="cz-panel pointer-events-auto absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-(--cz-panel-border) p-1 shadow-xl"
     >
       {TOOLS.map(({ tool, icon, label, key }) => (
         <ToolButton key={tool} tool={tool} icon={icon} label={label} keyLabel={key} />
@@ -95,7 +95,7 @@ export function Toolbar() {
             variant="ghost"
             size="icon"
             aria-label="Create component"
-            className="text-[var(--cz-panel-fg)] hover:bg-[var(--cz-panel-hover)] hover:text-white"
+            className="text-(--cz-panel-fg) hover:bg-(--cz-panel-hover) hover:text-white"
             onClick={() => createMainComponent({ store: editorStore }, editorStore.ui.selection)}
             disabled={ui.selection.length !== 1}
           >
@@ -114,8 +114,8 @@ export function Toolbar() {
             aria-pressed={ui.tool === 'ai'}
             className={
               ui.tool === 'ai'
-                ? 'bg-[var(--cz-ai)] text-white hover:bg-[var(--cz-ai)] hover:text-white'
-                : 'text-[var(--cz-ai)] hover:bg-[var(--cz-panel-hover)]'
+                ? 'bg-(--cz-ai) text-white hover:bg-(--cz-ai) hover:text-white'
+                : 'text-(--cz-ai) hover:bg-(--cz-panel-hover)'
             }
             onClick={() => editorStore.setTool(ui.tool === 'ai' ? 'select' : 'ai')}
           >
@@ -125,11 +125,11 @@ export function Toolbar() {
         <TooltipContent side="top">AI panel — connect via MCP</TooltipContent>
       </Tooltip>
 
-      <div className="mx-1 h-5 w-px bg-[var(--cz-panel-border)]" />
+      <div className="mx-1 h-5 w-px bg-(--cz-panel-border)" />
 
       <Button
         variant="ghost" size="icon" aria-label="Undo"
-        className="text-[var(--cz-panel-fg)] hover:bg-[var(--cz-panel-hover)] hover:text-white disabled:opacity-30"
+        className="text-(--cz-panel-fg) hover:bg-(--cz-panel-hover) hover:text-white disabled:opacity-30"
         disabled={!editorStore.canUndo()}
         onClick={() => editorStore.undo()}
       >
@@ -137,26 +137,26 @@ export function Toolbar() {
       </Button>
       <Button
         variant="ghost" size="icon" aria-label="Redo"
-        className="text-[var(--cz-panel-fg)] hover:bg-[var(--cz-panel-hover)] hover:text-white disabled:opacity-30"
+        className="text-(--cz-panel-fg) hover:bg-(--cz-panel-hover) hover:text-white disabled:opacity-30"
         disabled={!editorStore.canRedo()}
         onClick={() => editorStore.redo()}
       >
         <Redo2 className="size-4" />
       </Button>
 
-      <div className="mx-1 h-5 w-px bg-[var(--cz-panel-border)]" />
+      <div className="mx-1 h-5 w-px bg-(--cz-panel-border)" />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
             data-testid="zoom-menu"
-            className="h-9 px-2 text-xs tabular-nums text-[var(--cz-panel-fg)] hover:bg-[var(--cz-panel-hover)] hover:text-white"
+            className="h-9 px-2 text-xs tabular-nums text-(--cz-panel-fg) hover:bg-(--cz-panel-hover) hover:text-white"
           >
             {Math.round(scale * 100)}%
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="top" align="end" className="cz-panel border-[var(--cz-panel-border)]">
+        <DropdownMenuContent side="top" align="end" className="cz-panel border-(--cz-panel-border)">
           <DropdownMenuItem onClick={() => controllerRef.current?.zoomTo(1)}>
             Zoom to 100% <kbd className="ml-auto opacity-50">⌘0</kbd>
           </DropdownMenuItem>

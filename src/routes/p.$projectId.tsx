@@ -75,9 +75,9 @@ function EditorPage() {
 
   if (state === 'missing') {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-3 bg-[var(--cz-canvas-bg)] text-sm text-[var(--cz-panel-muted)]">
+      <div className="flex h-screen flex-col items-center justify-center gap-3 bg-(--cz-canvas-bg) text-sm text-(--cz-panel-muted)">
         <span>This file does not exist (or was deleted).</span>
-        <Link to="/" className="text-[var(--cz-accent)] hover:underline">
+        <Link to="/" className="text-(--cz-accent) hover:underline">
           Back to files
         </Link>
       </div>
@@ -86,7 +86,7 @@ function EditorPage() {
 
   if (state === 'loading') {
     return (
-      <div className="flex h-screen items-center justify-center bg-[var(--cz-canvas-bg)] text-sm text-[var(--cz-panel-muted)]">
+      <div className="flex h-screen items-center justify-center bg-(--cz-canvas-bg) text-sm text-(--cz-panel-muted)">
         Loading document…
       </div>
     )
@@ -94,7 +94,7 @@ function EditorPage() {
 
   return (
     <TooltipProvider delayDuration={400}>
-      <div className="flex h-screen flex-col overflow-hidden bg-[var(--cz-canvas-bg)]">
+      <div className="flex h-screen flex-col overflow-hidden bg-(--cz-canvas-bg)">
         <TopBar />
         <div className="flex min-h-0 flex-1">
           <LeftPanel />

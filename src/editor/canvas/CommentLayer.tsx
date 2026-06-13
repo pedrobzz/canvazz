@@ -146,18 +146,18 @@ function PinPopover({ thread }: { thread: CommentThread }) {
     <div className="cz-comment-surface absolute left-9 top-[-28px] w-56 p-2.5 text-[12px]">
       <div className="mb-1 flex items-center gap-1.5">
         <AuthorChip author={last.author} />
-        <span className="text-[10px] text-[var(--cz-panel-muted)]">{timeAgo(last.createdAt)}</span>
+        <span className="text-[10px] text-(--cz-panel-muted)">{timeAgo(last.createdAt)}</span>
         {thread.resolved ? (
           <span className="ml-auto text-[10px] font-medium text-[#30d158]">Resolved</span>
         ) : null}
       </div>
-      <p className="line-clamp-3 whitespace-pre-wrap break-words text-[var(--cz-panel-fg)]">
+      <p className="line-clamp-3 whitespace-pre-wrap wrap-break-word text-(--cz-panel-fg)">
         {last.body}
       </p>
       <div className="mt-2 flex items-center gap-1">
         <button
           type="button"
-          className="rounded-md bg-[var(--cz-panel-hover)] px-2 py-1 text-[11px] hover:bg-[var(--cz-panel-active)] hover:text-white"
+          className="rounded-md bg-(--cz-panel-hover) px-2 py-1 text-[11px] hover:bg-(--cz-panel-active) hover:text-white"
           onClick={() => editorStore.setUi({ activeCommentId: thread.id, commentDraft: null })}
         >
           Open thread
@@ -165,7 +165,7 @@ function PinPopover({ thread }: { thread: CommentThread }) {
         <button
           type="button"
           aria-label="Delete comment"
-          className="ml-auto rounded-md p-1 text-[var(--cz-panel-muted)] hover:bg-[var(--cz-panel-hover)] hover:text-[#FF453A]"
+          className="ml-auto rounded-md p-1 text-(--cz-panel-muted) hover:bg-(--cz-panel-hover) hover:text-[#FF453A]"
           onClick={() => editorStore.deleteCommentThread(thread.id)}
         >
           <Trash2 className="size-3.5" />
@@ -197,12 +197,12 @@ function ThreadCard({ thread }: { thread: CommentThread }) {
 
   return (
     <div className="cz-comment-surface absolute left-9 top-[-28px] flex max-h-[60vh] w-72 flex-col text-[12px]">
-      <div className="flex items-center gap-2 border-b border-[var(--cz-panel-border)] px-3 py-2">
-        <span className="font-semibold text-[var(--cz-panel-fg)]">
+      <div className="flex items-center gap-2 border-b border-(--cz-panel-border) px-3 py-2">
+        <span className="font-semibold text-(--cz-panel-fg)">
           {thread.area ? 'Area comment' : 'Comment'}
         </span>
         {thread.nodeIds.length > 0 ? (
-          <span className="text-[10px] text-[var(--cz-panel-muted)]">
+          <span className="text-[10px] text-(--cz-panel-muted)">
             {thread.nodeIds.length} {thread.nodeIds.length === 1 ? 'node' : 'nodes'}
           </span>
         ) : null}
@@ -211,8 +211,8 @@ function ThreadCard({ thread }: { thread: CommentThread }) {
             type="button"
             className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] ${
               thread.resolved
-                ? 'text-[#30d158] hover:bg-[var(--cz-panel-hover)]'
-                : 'text-[var(--cz-panel-muted)] hover:bg-[var(--cz-panel-hover)] hover:text-white'
+                ? 'text-[#30d158] hover:bg-(--cz-panel-hover)'
+                : 'text-(--cz-panel-muted) hover:bg-(--cz-panel-hover) hover:text-white'
             }`}
             title={thread.resolved ? 'Reopen thread' : 'Resolve thread'}
             onClick={() => editorStore.setCommentResolved(thread.id, !thread.resolved)}
@@ -223,7 +223,7 @@ function ThreadCard({ thread }: { thread: CommentThread }) {
           <button
             type="button"
             aria-label="Delete comment"
-            className="rounded-md p-1 text-[var(--cz-panel-muted)] hover:bg-[var(--cz-panel-hover)] hover:text-[#FF453A]"
+            className="rounded-md p-1 text-(--cz-panel-muted) hover:bg-(--cz-panel-hover) hover:text-[#FF453A]"
             onClick={() => editorStore.deleteCommentThread(thread.id)}
           >
             <Trash2 className="size-3.5" />
@@ -231,7 +231,7 @@ function ThreadCard({ thread }: { thread: CommentThread }) {
           <button
             type="button"
             aria-label="Close thread"
-            className="rounded-md p-1 text-[var(--cz-panel-muted)] hover:bg-[var(--cz-panel-hover)] hover:text-white"
+            className="rounded-md p-1 text-(--cz-panel-muted) hover:bg-(--cz-panel-hover) hover:text-white"
             onClick={() => editorStore.setUi({ activeCommentId: null })}
           >
             <X className="size-3.5" />
@@ -244,7 +244,7 @@ function ThreadCard({ thread }: { thread: CommentThread }) {
           <div key={m.id} className={`cz-comment-msg${m.author === 'agent' ? ' cz-comment-msg--agent' : ''}`}>
             <div className="mb-1 flex items-center gap-1.5">
               <AuthorChip author={m.author} />
-              <span className="text-[10px] text-[var(--cz-panel-muted)]">
+              <span className="text-[10px] text-(--cz-panel-muted)">
                 {timeAgo(m.createdAt)}
                 {m.editedAt ? ' · edited' : ''}
               </span>
@@ -252,7 +252,7 @@ function ThreadCard({ thread }: { thread: CommentThread }) {
                 <button
                   type="button"
                   aria-label="Edit comment"
-                  className="ml-auto rounded p-0.5 text-[var(--cz-panel-muted)] hover:text-white"
+                  className="ml-auto rounded p-0.5 text-(--cz-panel-muted) hover:text-white"
                   onClick={() => {
                     setEditingId(m.id)
                     setEditText(m.body)
@@ -282,14 +282,14 @@ function ThreadCard({ thread }: { thread: CommentThread }) {
                 <div className="flex justify-end gap-1.5">
                   <button
                     type="button"
-                    className="rounded-md px-2 py-1 text-[11px] text-[var(--cz-panel-muted)] hover:text-white"
+                    className="rounded-md px-2 py-1 text-[11px] text-(--cz-panel-muted) hover:text-white"
                     onClick={() => setEditingId(null)}
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
-                    className="rounded-md bg-[var(--cz-accent)] px-2 py-1 text-[11px] text-white"
+                    className="rounded-md bg-(--cz-accent) px-2 py-1 text-[11px] text-white"
                     onClick={saveEdit}
                   >
                     Save
@@ -297,13 +297,13 @@ function ThreadCard({ thread }: { thread: CommentThread }) {
                 </div>
               </div>
             ) : (
-              <p className="whitespace-pre-wrap break-words text-[var(--cz-panel-fg)]">{m.body}</p>
+              <p className="whitespace-pre-wrap wrap-break-word text-(--cz-panel-fg)">{m.body}</p>
             )}
           </div>
         ))}
       </div>
 
-      <div className="flex items-end gap-1.5 border-t border-[var(--cz-panel-border)] p-2">
+      <div className="flex items-end gap-1.5 border-t border-(--cz-panel-border) p-2">
         <textarea
           rows={1}
           placeholder={thread.resolved ? 'Reply to reopen…' : 'Reply…'}
@@ -320,7 +320,7 @@ function ThreadCard({ thread }: { thread: CommentThread }) {
         />
         <button
           type="button"
-          className="shrink-0 rounded-md bg-[var(--cz-accent)] px-2.5 py-1.5 text-[11px] font-medium text-white disabled:opacity-40"
+          className="shrink-0 rounded-md bg-(--cz-accent) px-2.5 py-1.5 text-[11px] font-medium text-white disabled:opacity-40"
           disabled={!reply.trim()}
           onClick={sendReply}
         >
@@ -350,7 +350,7 @@ function Composer({ draft }: { draft: CommentDraft }) {
   return (
     <div ref={ref} className="cz-comment-anchor" style={{ zIndex: 40 }}>
       <div className="cz-comment-surface absolute left-4 top-[-10px] w-64 p-2.5">
-        <div className="mb-1.5 text-[10px] text-[var(--cz-panel-muted)]">
+        <div className="mb-1.5 text-[10px] text-(--cz-panel-muted)">
           {draft.area
             ? `Area comment · ${attached} ${attached === 1 ? 'node' : 'nodes'}`
             : attached > 0
@@ -376,14 +376,14 @@ function Composer({ draft }: { draft: CommentDraft }) {
         <div className="mt-2 flex justify-end gap-1.5">
           <button
             type="button"
-            className="rounded-md px-2 py-1 text-[11px] text-[var(--cz-panel-muted)] hover:text-white"
+            className="rounded-md px-2 py-1 text-[11px] text-(--cz-panel-muted) hover:text-white"
             onClick={() => editorStore.setUi({ commentDraft: null })}
           >
             Cancel
           </button>
           <button
             type="button"
-            className="rounded-md bg-[var(--cz-accent)] px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-40"
+            className="rounded-md bg-(--cz-accent) px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-40"
             disabled={!body.trim()}
             onClick={submit}
           >
@@ -398,12 +398,12 @@ function Composer({ draft }: { draft: CommentDraft }) {
 function AuthorChip({ author }: { author: CommentAuthor }) {
   if (author === 'agent') {
     return (
-      <span className="flex items-center gap-1 text-[11px] font-semibold text-[var(--cz-ai)]">
+      <span className="flex items-center gap-1 text-[11px] font-semibold text-(--cz-ai)">
         <Sparkles className="size-3" /> Agent
       </span>
     )
   }
-  return <span className="text-[11px] font-semibold text-[var(--cz-panel-fg)]">You</span>
+  return <span className="text-[11px] font-semibold text-(--cz-panel-fg)">You</span>
 }
 
 /** Compact relative timestamp ("just now", "5m ago", "3h ago", "2d ago"). */
