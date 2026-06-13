@@ -102,6 +102,15 @@ export const ALLOWED_CSS_PROPS = new Set([
   'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
   'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
   'box-sizing', 'aspect-ratio', 'overflow', 'overflow-x', 'overflow-y',
+  // Logical box properties (writing-mode aware equivalents of the above)
+  'padding-inline', 'padding-block', 'padding-inline-start', 'padding-inline-end',
+  'padding-block-start', 'padding-block-end',
+  'margin-inline', 'margin-block', 'margin-inline-start', 'margin-inline-end',
+  'margin-block-start', 'margin-block-end',
+  'inset-inline', 'inset-block', 'inset-inline-start', 'inset-inline-end',
+  'inset-block-start', 'inset-block-end',
+  'inline-size', 'block-size', 'min-inline-size', 'min-block-size',
+  'max-inline-size', 'max-block-size',
   // Flex / grid
   'display', 'flex', 'flex-direction', 'flex-wrap', 'flex-flow', 'flex-grow',
   'flex-shrink', 'flex-basis', 'order', 'gap', 'row-gap', 'column-gap',
@@ -126,7 +135,10 @@ export const ALLOWED_CSS_PROPS = new Set([
   'color', 'accent-color', 'caret-color',
   // Typography
   'font', 'font-family', 'font-size', 'font-weight', 'font-style',
-  'font-variant', 'font-stretch', 'line-height', 'letter-spacing',
+  'font-variant', 'font-variant-numeric', 'font-variant-ligatures',
+  'font-variant-caps', 'font-feature-settings', 'font-kerning',
+  'font-synthesis', '-webkit-font-smoothing', '-moz-osx-font-smoothing',
+  'font-stretch', 'line-height', 'letter-spacing',
   'word-spacing', 'text-align', 'text-decoration', 'text-decoration-line',
   'text-decoration-style', 'text-decoration-color', 'text-decoration-thickness',
   'text-transform', 'text-overflow', 'text-shadow', 'text-indent', 'text-wrap',
