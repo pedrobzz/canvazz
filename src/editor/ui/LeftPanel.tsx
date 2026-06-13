@@ -1,5 +1,7 @@
 import { useState, useSyncExternalStore } from 'react'
-import { Check, Component, File, Layers, Plus, ScrollText, Sparkles, User } from 'lucide-react'
+import {
+  Check, Component, File, Layers, MessageCircle, Plus, ScrollText, Sparkles, Trash2, User,
+} from 'lucide-react'
 import {
   ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger,
 } from '@/components/ui/context-menu'
@@ -12,8 +14,10 @@ import { DEFAULT_WEIGHTS, isValidFamily, verifyFontLoaded } from '../fonts'
 import { insertHtml } from '../commands'
 import { genId } from '../model/ids'
 import { editorStore } from '../store/editorStore'
-import { useDocVersion } from '../store/hooks'
+import { useDocVersion, useUi } from '../store/hooks'
+import { timeAgo } from '../canvas/CommentLayer'
 import { LayerTree } from './LayerTree'
+import type { CommentThread } from '../model/types'
 
 export function LeftPanel() {
   return (
@@ -22,15 +26,18 @@ export function LeftPanel() {
       className="cz-panel flex h-full w-60 shrink-0 flex-col border-r border-[var(--cz-panel-border)]"
     >
       <Tabs defaultValue="layers" className="flex h-full min-h-0 flex-col gap-0">
-        <TabsList className="m-2 grid w-auto grid-cols-3 bg-[var(--cz-panel-hover)]">
-          <TabsTrigger value="layers" className="text-[11px] data-[state=active]:bg-[var(--cz-panel-active)] data-[state=active]:text-white">
-            <Layers className="size-3" /> Layers
+        <TabsList className="m-2 grid w-auto grid-cols-4 gap-0.5 bg-[var(--cz-panel-hover)]">
+          <TabsTrigger value="layers" className="gap-1 px-1 text-[10px] data-[state=active]:bg-[var(--cz-panel-active)] data-[state=active]:text-white">
+            <Layers className="size-3 shrink-0" /> Layers
           </TabsTrigger>
-          <TabsTrigger value="components" className="text-[11px] data-[state=active]:bg-[var(--cz-panel-active)] data-[state=active]:text-white">
-            <Component className="size-3" /> Assets
+          <TabsTrigger value="components" className="gap-1 px-1 text-[10px] data-[state=active]:bg-[var(--cz-panel-active)] data-[state=active]:text-white">
+            <Component className="size-3 shrink-0" /> Assets
           </TabsTrigger>
-          <TabsTrigger value="log" className="text-[11px] data-[state=active]:bg-[var(--cz-panel-active)] data-[state=active]:text-white">
-            <ScrollText className="size-3" /> Log
+          <TabsTrigger value="comments" className="gap-1 px-1 text-[10px] data-[state=active]:bg-[var(--cz-panel-active)] data-[state=active]:text-white">
+            <MessageCircle className="size-3 shrink-0" /> Notes
+          </TabsTrigger>
+          <TabsTrigger value="log" className="gap-1 px-1 text-[10px] data-[state=active]:bg-[var(--cz-panel-active)] data-[state=active]:text-white">
+            <ScrollText className="size-3 shrink-0" /> Log
           </TabsTrigger>
         </TabsList>
         <TabsContent value="layers" className="flex min-h-0 flex-1 flex-col">
@@ -45,6 +52,9 @@ export function LeftPanel() {
           <FontsSection />
           <IconsSection />
           <ComponentList />
+        </TabsContent>
+        <TabsContent value="comments" className="min-h-0 flex-1 overflow-y-auto">
+          <CommentsPanel />
         </TabsContent>
         <TabsContent value="log" className="min-h-0 flex-1 overflow-y-auto">
           <CommandLog />
@@ -460,6 +470,108 @@ function ComponentList() {
         </li>
       ))}
     </ul>
+  )
+}
+
+/** Center the viewport on a thread's anchor and open its card (switching page if needed). */
+function goToThread(thread: CommentThread) {
+  if (editorStore.doc.activePageId !== thread.pageId) editorStore.setActivePage(thread.pageId)
+  const viewport = document.querySelector<HTMLElement>('[data-canvas]')
+  if (viewport) {
+    const scale = cameraStore.camera.scale
+    cameraStore.set({
+      x: viewport.clientWidth / 2 - thread.x * scale,
+      y: viewport.clientHeight / 2 - thread.y * scale,
+    })
+  }
+  // setActivePage clears the open card, so set it after the page switch.
+  editorStore.setUi({ activeCommentId: thread.id, commentDraft: null })
+}
+
+/**
+ * Comments section: every thread in the document, split into Open and Resolved.
+ * Click a row to fly to its pin and open the thread; resolved rows can be
+ * reopened (by replying in the card) or deleted here.
+ */
+function CommentsPanel() {
+  useDocVersion()
+  const threads = editorStore.doc.comments ?? []
+  const open = threads.filter((t) => !t.resolved)
+  const resolved = threads.filter((t) => t.resolved)
+
+  if (threads.length === 0) {
+    return (
+      <div className="px-3 py-3 text-[11px] leading-relaxed text-[var(--cz-panel-muted)]">
+        No comments yet. Pick the Comment tool (C), then click a node or drag an area to start a
+        thread. The MCP agent can read and reply to threads too.
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-col" data-testid="comments-panel">
+      <CommentGroup title="Open" threads={open} />
+      <CommentGroup title="Resolved" threads={resolved} />
+    </div>
+  )
+}
+
+function CommentGroup({ title, threads }: { title: string; threads: CommentThread[] }) {
+  if (threads.length === 0) return null
+  return (
+    <div className="border-b border-[var(--cz-panel-border)] pb-1">
+      <div className="px-3 py-1.5 text-[11px] font-semibold text-[var(--cz-panel-fg)]">
+        {title} · {threads.length}
+      </div>
+      <ul className="flex flex-col gap-0.5 px-2">
+        {threads.map((thread) => (
+          <CommentRow key={thread.id} thread={thread} />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function CommentRow({ thread }: { thread: CommentThread }) {
+  const ui = useUi()
+  const last = thread.messages[thread.messages.length - 1]
+  const active = ui.activeCommentId === thread.id
+  const replies = thread.messages.length - 1
+  return (
+    <li
+      className={`group flex items-start gap-2 rounded px-2 py-1.5 ${
+        active ? 'bg-[var(--cz-accent)]/20' : 'hover:bg-[var(--cz-panel-hover)]'
+      }`}
+    >
+      <button
+        className="flex min-w-0 flex-1 items-start gap-2 text-left"
+        onClick={() => goToThread(thread)}
+      >
+        {thread.resolved ? (
+          <Check className="mt-0.5 size-3 shrink-0 text-[#30d158]" />
+        ) : (
+          <MessageCircle className="mt-0.5 size-3 shrink-0 text-[var(--cz-accent)]" />
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold text-[var(--cz-panel-fg)]">
+              {last.author === 'agent' ? 'Agent' : 'You'}
+            </span>
+            <span className="text-[9px] text-[var(--cz-panel-muted)]">{timeAgo(last.createdAt)}</span>
+            {replies > 0 ? (
+              <span className="text-[9px] text-[var(--cz-panel-muted)]">· {replies + 1}</span>
+            ) : null}
+          </span>
+          <span className="block truncate text-[11px] text-[var(--cz-panel-fg)]">{last.body}</span>
+        </span>
+      </button>
+      <button
+        aria-label="Delete comment"
+        className="mt-0.5 shrink-0 text-[var(--cz-panel-muted)] opacity-0 hover:text-[#FF453A] group-hover:opacity-100"
+        onClick={() => editorStore.deleteCommentThread(thread.id)}
+      >
+        <Trash2 className="size-3" />
+      </button>
+    </li>
   )
 }
 
