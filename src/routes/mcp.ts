@@ -341,12 +341,12 @@ server.registerTool('write_html', {
 server.registerTool('update_styles', {
   title: 'Update inline styles',
   description:
-    'Set/remove inline CSS on specific nodes. Batched into one undoable transaction. Use kebab-case props; null removes. Values are validated in the browser (CSS.supports), so bogus values like "flex-grow: banana" are caught instead of silently no-oping. Rejected entries are returned in `rejected` with a reason: "<id>:<prop> (unknown property)" | "(invalid value)" | "(disallowed value — use absolute)". position: fixed/sticky is rejected (escapes the canvas layout model — use absolute). var(--token), calc(), and gradients are supported.',
+    'Set/remove inline CSS on specific nodes. Batched into one undoable transaction. Use kebab-case props; null OR an empty string "" removes the property (so it falls back to its default — e.g. clear "top" so "bottom" wins). Values are validated in the browser (CSS.supports), so bogus values like "flex-grow: banana" are caught instead of silently no-oping. Rejected entries are returned in `rejected` with a reason: "<id>:<prop> (unknown property)" | "(invalid value)" | "(disallowed value — use absolute)". position: fixed/sticky is rejected (escapes the canvas layout model — use absolute). var(--token), calc(), and gradients are supported.',
   inputSchema: {
     project,
     updates: z.array(z.object({
       id: z.string(),
-      set: z.record(z.string(), z.string().nullable()).describe('e.g. {"background-color": "#fff", "padding": null}'),
+      set: z.record(z.string(), z.string().nullable()).describe('e.g. {"background-color": "#fff", "padding": null, "top": ""} — null or "" removes'),
     })).min(1),
   },
 }, forward('update_styles'))

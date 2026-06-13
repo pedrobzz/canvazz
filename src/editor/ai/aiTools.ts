@@ -507,8 +507,10 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       const safe: Record<string, string | null> = {}
       for (const [prop, value] of Object.entries(set)) {
         const key = prop.toLowerCase().trim()
-        if (value === null) {
-          // Removals only touch known props; an unknown name can't be set.
+        // null OR an empty/whitespace string removes the property (so a node can
+        // fall back to its default — e.g. clear `top` so `bottom` wins), matching
+        // the null=remove convention set_tokens already uses.
+        if (value === null || (typeof value === 'string' && value.trim() === '')) {
           if (isAllowedCssProp(key)) safe[key] = null
           else rejected.push(`${id}:${prop} (unknown property)`)
           continue
