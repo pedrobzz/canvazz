@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   Check, CornerUpLeft, MessageCircle, Pencil, Sparkles, Trash2, X,
 } from 'lucide-react'
 import { cameraStore } from './camera'
 import { editorStore } from '../store/editorStore'
-import { useDocVersion, useUi } from '../store/hooks'
+import { useDocVersion } from '../store/hooks'
 import type { CommentDraft } from '../store/editorStore'
 import type { CommentAuthor, CommentRect, CommentThread } from '../model/types'
 
@@ -18,18 +18,30 @@ import type { CommentAuthor, CommentRect, CommentThread } from '../model/types'
  */
 export function CommentLayer() {
   useDocVersion()
-  const ui = useUi()
+  // Subscribe to only the two ui fields this layer cares about, not the whole
+  // ui object: hover/selection update ui on every pointer move, and the layer
+  // must stay off that hot path. setUi preserves these references when they
+  // don't change, so useSyncExternalStore bails the re-render via Object.is.
+  const activeCommentId = useSyncExternalStore(
+    editorStore.subscribeUi,
+    () => editorStore.ui.activeCommentId,
+    () => editorStore.ui.activeCommentId,
+  )
+  const draft = useSyncExternalStore(
+    editorStore.subscribeUi,
+    () => editorStore.ui.commentDraft,
+    () => editorStore.ui.commentDraft,
+  )
   const activePageId = editorStore.doc.activePageId
   const threads = (editorStore.doc.comments ?? []).filter((t) => t.pageId === activePageId)
-  const active = threads.find((t) => t.id === ui.activeCommentId)
-  const draft = ui.commentDraft
+  const active = threads.find((t) => t.id === activeCommentId)
 
   return (
     <div className="cz-comment-layer" data-cz-ui>
       {active?.area ? <CommentArea area={active.area} /> : null}
       {draft?.area ? <CommentArea area={draft.area} /> : null}
       {threads.map((thread) => (
-        <CommentPin key={thread.id} thread={thread} active={thread.id === ui.activeCommentId} />
+        <CommentPin key={thread.id} thread={thread} active={thread.id === activeCommentId} />
       ))}
       {draft ? <Composer draft={draft} /> : null}
     </div>
