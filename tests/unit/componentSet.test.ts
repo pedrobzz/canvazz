@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { emptyDocument } from '#/editor/model/doc'
 import { EditorStore } from '#/editor/store/editorStore'
 import { createVariant, deleteComponent } from '#/editor/components/componentCommands'
-import type { DocumentModel, NodeModel } from '#/editor/model/types'
+import type { DocumentModel, NodeId, NodeModel } from '#/editor/model/types'
 
 function node(partial: Partial<NodeModel> & Pick<NodeModel, 'id' | 'tag'>): NodeModel {
   return {
@@ -85,5 +85,61 @@ describe('createVariant — Figma-style set frames', () => {
     expect(store.doc.nodes.root.parent).toBeNull()
     expect(store.doc.nodes.root.style.position).toBe('absolute')
     expect(store.doc.components.cmp.setId).toBeUndefined()
+  })
+})
+
+/** Add a free-floating instance node of a component to the page. */
+function addInstance(store: EditorStore, id: NodeId, componentId: string, variantId?: string): void {
+  store.replaceDocument({
+    ...store.doc,
+    nodes: { ...store.doc.nodes, [id]: node({ id, tag: 'div', componentId, variantId }) },
+    pages: [{ ...store.doc.pages[0], children: [...store.doc.pages[0].children, id] }],
+  })
+}
+
+describe('deleteComponent — error precedence (#16c)', () => {
+  it('reports blocking instance ids FIRST, before the variants-first message', () => {
+    const store = storeWithComponent()
+    createVariant({ store }, 'cmp', 'alt') // makes cmp the base of a set
+    addInstance(store, 'n_a', 'cmp')
+    addInstance(store, 'n_b', 'cmp')
+
+    const res = deleteComponent({ store }, 'cmp')
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.reason).toContain('2 instances depend on this component')
+    expect(res.reason).toContain('n_a')
+    expect(res.reason).toContain('n_b')
+    expect(res.reason).not.toContain('base definition')
+  })
+
+  it('an instance of any variant blocks deleting the base', () => {
+    const store = storeWithComponent()
+    const v1 = createVariant({ store }, 'cmp', 'alt')!
+    addInstance(store, 'n_v', v1.variantId) // instance points at the variant
+
+    const res = deleteComponent({ store }, 'cmp')
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.reason).toContain('1 instance depend')
+    expect(res.reason).toContain('n_v')
+  })
+
+  it('singular grammar for one blocking instance', () => {
+    const store = storeWithComponent()
+    addInstance(store, 'only', 'cmp')
+    const res = deleteComponent({ store }, 'cmp')
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.reason).toMatch(/^1 instance depend/)
+  })
+
+  it('falls back to the variants-first message only when no instance blocks', () => {
+    const store = storeWithComponent()
+    createVariant({ store }, 'cmp', 'alt')
+    const res = deleteComponent({ store }, 'cmp')
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.reason).toContain('base definition')
   })
 })
