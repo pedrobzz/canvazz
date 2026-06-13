@@ -440,6 +440,31 @@ server.registerTool('finish', {
   inputSchema: { project, summary: z.string().optional() },
 }, forward('finish'))
 
+// --- Charts (#18) -----------------------------------------------------------
+
+server.registerTool('insert_chart', {
+  title: 'Insert a data chart',
+  description:
+    'Generate a chart from raw values as ordinary, restylable canvas nodes (div bars / one SVG line path / SVG donut arcs) — a pure generator, not a widget. Auto-scales to the data range and handles zero/negative/single-point. e.g. [3,5,2,8,6,7,4] → a scaled bar chart. Place into a named slot (targetName) or by id (targetId), or free at x/y.',
+  inputSchema: {
+    project,
+    type: z.enum(['bar', 'line', 'sparkline', 'donut']).describe('Chart kind'),
+    data: z.array(z.union([
+      z.number(),
+      z.object({ label: z.string().optional(), value: z.number() }),
+    ])).min(1).describe('number[] or {label,value}[]'),
+    width: z.number().positive().optional().describe('px, default 240'),
+    height: z.number().positive().optional().describe('px, default 140'),
+    color: z.string().optional().describe('Series/fill color (CSS color or var(--token))'),
+    trackColor: z.string().optional().describe('Donut unfilled-track color'),
+    labels: z.boolean().optional().describe('Show value/category labels where supported'),
+    targetId: z.string().optional().describe('Container node id'),
+    targetName: z.string().optional().describe('Container by layer name'),
+    x: z.number().optional(), y: z.number().optional(),
+    index: z.number().int().optional(),
+  },
+}, forward('insert_chart'))
+
 export const Route = createFileRoute('/mcp')({
   server: {
     handlers: {

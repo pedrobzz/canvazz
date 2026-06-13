@@ -14,6 +14,8 @@ import {
 } from '../components/componentCommands'
 import { sfSymbolMarkup } from '@/components/SFSymbol'
 import { ensureIconRegistries } from '../iconResolver'
+import { buildChart } from '../charts'
+import type { ChartDatum, ChartType } from '../charts'
 import { DEFAULT_WEIGHTS, isValidFamily, syncDocumentFonts, verifyFontLoaded } from '../fonts'
 import { genId } from '../model/ids'
 import { createArtboard } from '../model/factory'
@@ -637,6 +639,61 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       nodeCount: Object.keys(store.doc.nodes).length,
     }
   },
+
+  // --- Appended executors (#18, #19) --------------------------------------
+
+  insert_chart(args) {
+    const type = String(args.type ?? 'bar') as ChartType
+    if (!['bar', 'line', 'sparkline', 'donut'].includes(type)) {
+      throw new Error(`Unknown chart type: ${type}. Use bar | line | sparkline | donut.`)
+    }
+    const raw = args.data
+    if (!Array.isArray(raw) || raw.length === 0) throw new Error('data is required: number[] or {label,value}[]')
+    const data = raw.map((d) =>
+      typeof d === 'number'
+        ? d
+        : { label: (d as Json).label as string | undefined, value: Number((d as Json).value) || 0 },
+    ) as number[] | ChartDatum[]
+
+    const { markup, name } = buildChart({
+      type,
+      data,
+      width: args.width as number | undefined,
+      height: args.height as number | undefined,
+      color: args.color as string | undefined,
+      trackColor: args.trackColor as string | undefined,
+      labels: args.labels as boolean | undefined,
+    })
+
+    const at = positionedLocation(args)
+    const { rootIds, dropped } = insertHtml({ ...AI }, markup, at, `AI: insert ${type} chart`)
+    if (rootIds.length === 0) throw new Error(`Chart markup rejected: ${dropped.join(', ')}`)
+    // Free-floating charts (no container) anchor at the requested x/y.
+    if (!chartTargetId(args) && (args.x !== undefined || args.y !== undefined)) {
+      store.apply('AI: position chart', [{
+        t: 'setStyle', id: rootIds[0],
+        set: { position: 'absolute', left: `${Number(args.x) || 0}px`, top: `${Number(args.y) || 0}px` },
+      }], 'ai')
+    }
+    store.setSelection(rootIds)
+    return { ...mutationResult('insert_chart', rootIds), chart: name, dropped }
+  },
+}
+
+/** insert_chart container target (parent node id), if any. */
+function chartTargetId(args: Json): string | undefined {
+  return (args.targetId as string | undefined) ?? (args.targetName as string | undefined ? findByName(String(args.targetName)) : undefined)
+}
+
+function findByName(name: string): string | undefined {
+  const lower = name.toLowerCase()
+  return Object.values(store.doc.nodes).find((n) => n.name.toLowerCase() === lower)?.id
+}
+
+/** Resolve insert_chart placement: into a named/id'd slot, else the page. */
+function positionedLocation(args: Json): NodeLocation {
+  const target = chartTargetId(args)
+  return locationFor(target, args.index as number | undefined)
 }
 
 function collectFrom(nodes: NodeModel[], rootId: string): NodeModel[] {
