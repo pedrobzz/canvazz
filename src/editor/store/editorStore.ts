@@ -157,28 +157,30 @@ export class EditorStore {
     if (last) last.selectionAfter = this.ui.selection
   }
 
-  undo(): boolean {
+  /** Revert the latest transaction. Returns its label + reverted node ids, or null when the stack is empty. */
+  undo(): { label: string; changed: NodeId[] } | null {
     const entry = this.undoStack.pop()
-    if (!entry) return false
+    if (!entry) return null
     const { doc, changed } = applyOps(this.doc, entry.tx.inverse)
     this.doc = doc
     this.redoStack.push(entry)
     this.log = this.log.map((l) => (l.id === entry.tx.id ? { ...l, undone: true } : l))
     this.setSelection(entry.selectionBefore.filter((id) => this.doc.nodes[id]))
     this.commit(changed)
-    return true
+    return { label: entry.tx.label, changed }
   }
 
-  redo(): boolean {
+  /** Re-apply the latest undone transaction. Returns its label + node ids, or null when nothing to redo. */
+  redo(): { label: string; changed: NodeId[] } | null {
     const entry = this.redoStack.pop()
-    if (!entry) return false
+    if (!entry) return null
     const { doc, changed } = applyOps(this.doc, entry.tx.ops)
     this.doc = doc
     this.undoStack.push(entry)
     this.log = this.log.map((l) => (l.id === entry.tx.id ? { ...l, undone: false } : l))
     this.setSelection(entry.selectionAfter.filter((id) => this.doc.nodes[id]))
     this.commit(changed)
-    return true
+    return { label: entry.tx.label, changed }
   }
 
   canUndo = () => this.undoStack.length > 0
