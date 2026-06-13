@@ -794,7 +794,14 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       : `AI: insert ${createdIds.length} icons`
     store.apply(label, ops, 'ai')
     store.setSelection(createdIds)
-    return { ...mutationResult('insert_icon', createdIds), variant, createdIds, icons: results }
+    return {
+      ...mutationResult('insert_icon', createdIds),
+      variant,
+      createdIds,
+      icons: results,
+      // Single-icon form keeps its original contract.
+      ...(items.length === 1 && results[0]?.ok ? { symbol: results[0].name } : {}),
+    }
   },
 
   create_page(args) {

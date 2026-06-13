@@ -269,10 +269,13 @@ export function deleteComponent(ctx: Ctx, componentId: string): { ok: true } | {
   if (!def) return { ok: false, reason: `Unknown component: ${componentId}` }
 
   const set = def.setId ? store.doc.componentSets[def.setId] : null
-  // Live instances block deletion regardless of variant structure, so they are
-  // reported FIRST with their ids — detaching them is the real unblock. An
-  // instance of any variant in the set still renders this definition's subtree.
-  const blockedBy = new Set(set ? set.variantIds : [componentId])
+  // Instances that would be orphaned block deletion and are reported FIRST with
+  // their ids — detaching them is the real unblock. Deleting the BASE orphans
+  // instances of every variant in the set; deleting a non-base variant orphans
+  // only instances linked to it directly — instances merely SWITCHED to it fall
+  // back to their base below.
+  const isSetBase = Boolean(set && (set.defaultVariantId === componentId || set.variantIds[0] === componentId))
+  const blockedBy = new Set(isSetBase && set ? set.variantIds : [componentId])
   const dependents = Object.values(store.doc.nodes).filter(
     (n) => n.componentId && blockedBy.has(n.componentId),
   )
