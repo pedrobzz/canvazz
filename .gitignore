@@ -17,3 +17,10 @@ test-results/
 playwright-report/
 
 scripts/
+
+# Compiled standalone binary (built in CI, attached to GitHub Releases)
+canvazz-darwin-arm64
+canvazz-darwin-arm64.sha256
+RELEASE_NOTES.md
+NOTES.md
+CHANGES.md

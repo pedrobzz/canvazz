@@ -1,0 +1,16 @@
+diff --git a/index.js b/index.js
+index e24987954ec427320f51fd8037f9754b60ffa363..132ff05632744ce73a6936e17e3467b9e039f80b 100644
+--- a/index.js
++++ b/index.js
+@@ -23,6 +23,11 @@ function requireNative() {
+   if (target === "linux-arm-gnueabihf" && familySync() == MUSL) {
+       target = "linux-arm-musleabihf";
+   }
++  // canvazz patch: a literal require so `bun build --compile` can statically
++  // bundle the prebuilt addon into the single-file binary (computed-string
++  // requires are invisible to the bundler). Other platforms keep the dynamic
++  // path below, so dev/CI on Linux is unaffected.
++  if (target === "darwin-arm64") return require("@libsql/darwin-arm64");
+   return require(`@libsql/${target}`);
+ }
+ 

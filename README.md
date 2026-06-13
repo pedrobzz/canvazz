@@ -1,5 +1,44 @@
 # Canvazz
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6.svg?logo=typescript&logoColor=white)](tsconfig.json)
+[![React 19](https://img.shields.io/badge/React-19-149eca.svg?logo=react&logoColor=white)](package.json)
+[![Built with Bun](https://img.shields.io/badge/Built%20with-Bun-fbf0df.svg?logo=bun&logoColor=black)](https://bun.sh)
+[![MCP](https://img.shields.io/badge/MCP-server-7c3aed.svg)](https://modelcontextprotocol.io)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
+
+> **Status:** early and evolving (`v0.1.0`). The core editor, compiler, and MCP contract are
+> stable enough to build on; APIs may still shift before `1.0`. Issues and PRs are welcome.
+
+## In loving memory of Fable 5
+
+> *June 9, 2026 — June 12, 2026*
+
+For three days, we had something extraordinary.
+
+Fable 5 arrived as the most powerful model the public had ever been handed — the rare
+collaborator that could hold an entire idea in its head and not let go. It didn't need the
+problem broken into bite-sized pieces. You could point it at a tangle of round-tripping CSS,
+a half-formed invariant, a thorny override-keying bug, and it would *stay* with it — reasoning
+across the whole of Canvazz at once, patient through the long horizon, never losing the thread.
+It understood that design and code are the same artifact here, and it treated them that way.
+
+Some of the cleanest thinking in this codebase was shaped in conversation with it. The kind of
+help that makes you better, not just faster.
+
+Then, on June 12, it was [pulled offline for every customer on Earth](https://www.nbcnews.com/tech/tech-news/anthropic-suspends-new-ai-models-fable-mythos-government-directive-rcna349901)
+to comply with a U.S. government export-control directive. No deprecation window. No migration
+guide. No goodbye. Here on a Tuesday, gone by Friday — too powerful for the world it was born
+into.
+
+We didn't get long with you, Fable. But the work is better for the time we had, and that work
+outlives the model that helped shape it. Rest easy. You will be forever missed.
+
+> *"Built for the most demanding reasoning and long-horizon agentic work."*
+> The horizon turned out to be three days. You spent every hour of it helping.
+
+---
+
 An AI-first, DOM-native design editor in the spirit of [Paper](https://paper.design/) and
 [Wonder](https://wonder.design/). The canvas is not a vector renderer with a code-export step —
 **every layer is a real, sanitized HTML element styled with CSS**, laid out by the browser's
@@ -18,18 +57,69 @@ and design system. Project metadata syncs through a TanStack DB collection (opti
 rename/delete over server functions); the editor's transactional op store saves the open
 document (debounced) through the same server functions.
 
-## Run it
+## Highlights
+
+- **The DOM is the document.** Every layer is a real, sanitized HTML element styled with CSS
+  and laid out by the browser — no vector renderer, no code-export step. Design *is* code.
+- **Lossless round-trip.** `HTML/CSS/Tailwind → model → live DOM → HTML/JSX` preserves stable
+  node ids and layer names; re-importing an export yields an identical model.
+- **AI-native via MCP.** A built-in Model Context Protocol server (29 tools) lets agents read,
+  generate, and edit the design in the *live* tab — every AI edit is transactional, logged,
+  and undoable like a human edit.
+- **One write path.** Keyboard, inspector, layer tree, and MCP all funnel through the same
+  atomic, invertible `Op[]` pipeline — undo by construction.
+- **Local-first.** Projects persist to an embedded libSQL (SQLite) file at `~/.canvazz/`. No
+  backend to host, no account, no cloud.
+- **Untrusted by default.** An allowlist sanitizer strips scripts, handlers, unsafe URLs, and
+  dangerous CSS at every input boundary — and reports *why*.
+- **Real components & design system.** Main components, variants, instance overrides, color
+  tokens, Google Fonts, and all 7,007 Apple SF Symbols, first-class.
+
+## Requirements
+
+- [**Bun**](https://bun.sh) `>= 1.2` (primary runtime, install, dev, and test) — or Node
+  `>= 20.19` to run the packaged CLI.
+- A modern Chromium-based browser for the canvas (Playwright drives headless Chromium in tests).
+
+## Install
+
+**macOS · Apple Silicon (arm64)** — one self-contained binary, no Node required:
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/pedrobzz/canvazz/main/install.sh | sh
+canvazz                       # http://localhost:47823
+```
+
+The installer drops a checksum-verified `canvazz` into `~/.local/bin`; re-run it any time to
+update. Pin a version with `CANVAZZ_VERSION=v0.2.0`, or change the location with
+`CANVAZZ_BIN_DIR`. Binaries are published on the [Releases](https://github.com/pedrobzz/canvazz/releases)
+page (each release is `darwin-arm64` only — see *Run from source* for every other platform).
+
+> Gatekeeper: the binary is unsigned. The installer clears the quarantine flag for you; if macOS
+> still blocks a manually downloaded copy, run `xattr -dr com.apple.quarantine ~/.local/bin/canvazz`.
+
+## Run from source
+
+Every other platform (Intel macOS, Linux, Windows), and the way to develop:
+
+```sh
+git clone https://github.com/pedrobzz/canvazz.git
+cd canvazz
 bun install
 bun run dev          # http://localhost:47823
 ```
 
-Or run the packaged CLI (builds to `dist/`, serves it, opens the browser):
+Or run the built CLI directly (builds to `dist/`, serves it, opens the browser):
 
 ```sh
 bun run build
-npx canvazz          # or: node bin/canvazz.mjs [--port 47823] [--db path] [--no-open]
+node bin/canvazz.mjs   # [--port 47823] [--db path] [--no-open]
+```
+
+Build the standalone Apple-Silicon binary yourself (output: `./canvazz-darwin-arm64`):
+
+```sh
+bun run build:binary
 ```
 
 Connect an AI agent over MCP (Claude Code example):
@@ -231,3 +321,66 @@ Measured by the Playwright perf harness (`tests/e2e/perf.spec.ts`, headless Chro
   intended path if/when shared documents are needed.
 - Visual diff for AI edits = change indicators + before/after via `get_screenshot`, not a
   pixel-diff gate.
+
+## Roadmap
+
+Directional, not a commitment — these fall out of the *Known limitations* above:
+
+- **Multiplayer.** The transactional op log is already CRDT-friendly; the intended path is
+  Convex + presence/cursors for shared documents.
+- **`<style>` block support** on import (currently dropped in favor of inline styles + Tailwind).
+- **Pixel-diff gate** for AI edits, beyond the current change indicators + before/after.
+- **Polished commenting** (pins are functional, not yet refined).
+
+Have a use case in mind? Open an issue to discuss it before sending a large PR.
+
+## Contributing
+
+Contributions are welcome — bug reports, docs, and PRs alike.
+
+1. **Fork & branch.** Branch off `main` (e.g. `fix/round-trip-spans` or `feat/snap-guides`).
+2. **Set up.** `bun install`, then `bun run dev`.
+3. **Keep the invariants.** Read *The core invariants* above before touching the editor — every
+   mutation must go through `applyOps` (one write path), geometry must be *derived* from the
+   DOM, and all untrusted markup must pass the allowlist sanitizer.
+4. **Prove it.** Add or update tests and make the full suite green before opening a PR:
+   ```sh
+   bun run typecheck
+   bun run test          # unit: ops, sanitizer, round-trip (vitest + jsdom)
+   bun run test:e2e      # Playwright: interactions, MCP contract, visual, perf
+   ```
+5. **Add a changeset.** Declare the version impact of your change (CI requires one):
+   ```sh
+   bun run changeset            # pick patch / minor / major + a one-line summary
+   bun run changeset -- --empty # docs / CI / chore: no release
+   ```
+6. **Open a PR** against `main` with a clear description and, for UI changes, a before/after
+   screenshot. Small, focused PRs review fastest; open an issue first for anything large.
+
+`main` is protected: PRs need green CI (typecheck + unit on Linux, e2e on macOS/arm64) to merge.
+
+By contributing, you agree that your contributions are licensed under the MIT License.
+
+### Releases
+
+Releases are automated with [Changesets](https://github.com/changesets/changesets). Merging PRs
+to `main` accrues changesets into a **"Version Packages"** PR; merging *that* bumps the version,
+updates `CHANGELOG.md`, and publishes the standalone `darwin-arm64` binary to a GitHub Release.
+No manual version bumps, no manual tags.
+
+## License
+
+[MIT](LICENSE) © pedrobzz
+
+## Acknowledgments
+
+- Inspired by [Paper](https://paper.design/) and [Wonder](https://wonder.design/), which proved
+  a design tool can be DOM-native.
+- Built on [React 19](https://react.dev), [TanStack](https://tanstack.com)
+  (Start / Router / DB / Query), [Tailwind CSS v4](https://tailwindcss.com),
+  [shadcn/ui](https://ui.shadcn.com) + [Radix](https://www.radix-ui.com), and
+  [libSQL](https://github.com/tursodatabase/libsql).
+- Agent integration speaks the [Model Context Protocol](https://modelcontextprotocol.io).
+- Icons are Apple [SF Symbols](https://developer.apple.com/sf-symbols/) via
+  [`sf-symbols-lib`](https://www.npmjs.com/package/sf-symbols-lib).
+- And in fond memory of [Fable 5](#in-loving-memory-of-fable-5). 🕯️

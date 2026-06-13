@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Opens/updates the "Version Packages" PR that consumes pending changesets,
+  # bumps package.json, and writes CHANGELOG.md. Does nothing once merged.
+  version:
+    name: Version PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Create or update version PR
+        uses: changesets/action@v1
+        with:
+          version: bun run version-packages
+          commit: "chore: version packages"
+          title: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Decides whether HEAD of main is a release commit: no pending changesets
+  # (the version PR was merged) and no tag for the current version yet.
+  check:
+    name: Decide release
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.decide.outputs.release }}
+      version: ${{ steps.decide.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: decide
+        run: |
+          set -e
+          git fetch --tags --force
+          version="$(node -p "require('./package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          pending="$(find .changeset -maxdepth 1 -name '*.md' ! -iname 'README.md' | wc -l | tr -d ' ')"
+          if [ "$pending" != "0" ]; then
+            echo "Pending changesets ($pending): version PR is open, not releasing."
+            echo "release=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "Tag v$version already exists: nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "Releasing v$version."
+          echo "release=true" >> "$GITHUB_OUTPUT"
+
+  # Builds the standalone darwin-arm64 binary and publishes the GitHub Release.
+  # macOS only spins up when there is actually something to release.
+  build-release:
+    name: Build & publish darwin-arm64 binary
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Build binary
+        run: bun run build:binary
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          ver="${{ needs.check.outputs.version }}"
+          # Pull this version's section out of CHANGELOG.md (first ## block).
+          awk '/^## /{c++} c==1{print} c==2{exit}' CHANGELOG.md > CHANGES.md 2>/dev/null || true
+          {
+            echo "## Canvazz v$ver — darwin-arm64 (Apple Silicon) only"
+            echo
+            echo "> The prebuilt binary is **macOS Apple Silicon (arm64) only**. On Intel macOS, Linux, or Windows, build from source (see the README)."
+            echo
+            echo "### Install / update"
+            echo ''
+            echo '```sh'
+            echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sh"
+            echo '```'
+            echo
+            echo "Verify: \`shasum -a 256 -c canvazz-darwin-arm64.sha256\`"
+            if [ -s CHANGES.md ]; then
+              echo
+              echo "### Changes"
+              echo
+              cat CHANGES.md
+            fi
+          } > NOTES.md
+          gh release create "v$ver" \
+            canvazz-darwin-arm64 \
+            canvazz-darwin-arm64.sha256 \
+            install.sh \
+            --target "$GITHUB_SHA" \
+            --title "canvazz v$ver · darwin-arm64 (Apple Silicon)" \
+            --notes-file NOTES.md
