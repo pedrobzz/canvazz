@@ -6,7 +6,8 @@ import { exportHtml, exportJsx } from '../compiler/export'
 import { parseHtml, sanitizeStyle } from '../compiler/parse'
 import { sanitizeClasses } from '../compiler/allowlist'
 import {
-  deleteNodes, duplicateNodes, insertHtml, locate, renameNode, setTextContent,
+  deletePage, deleteNodes, duplicateNodes, insertHtml, locate,
+  renameNode, renamePage, setTextContent,
 } from '../commands'
 import {
   createInstance, createMainComponent, createVariant, deleteComponent,
@@ -98,6 +99,19 @@ function treeSummary(id: NodeId, depth: number, maxDepth: number): string[] {
     return node.children.length > 0 ? [`${line} (+${node.children.length} children)`] : [line]
   }
   return [line, ...node.children.flatMap((c) => treeSummary(c, depth + 1, maxDepth))]
+}
+
+/** Resolve a page reference (id, else case-insensitive name) to a page model. */
+function resolvePage(ref: string) {
+  const trimmed = ref.trim()
+  const page = store.doc.pages.find((p) => p.id === trimmed)
+    ?? store.doc.pages.find((p) => p.name.toLowerCase() === trimmed.toLowerCase())
+  if (!page) {
+    throw new Error(
+      `Unknown page: ${ref}. Pages: ${store.doc.pages.map((p) => `${p.name} (${p.id})`).join(', ')}`,
+    )
+  }
+  return page
 }
 
 /** Resolve "insert into X" to a NodeLocation. */
@@ -537,14 +551,23 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   open_page(args) {
-    const ref = String(args.page ?? '')
-    const page = store.doc.pages.find((p) => p.id === ref)
-      ?? store.doc.pages.find((p) => p.name.toLowerCase() === ref.toLowerCase())
-    if (!page) {
-      throw new Error(`Unknown page: ${ref}. Pages: ${store.doc.pages.map((p) => `${p.name} (${p.id})`).join(', ')}`)
-    }
+    const page = resolvePage(String(args.page ?? ''))
     store.setActivePage(page.id)
     return { ok: true, pageId: page.id, name: page.name, topLevelCount: page.children.length }
+  },
+
+  rename_page(args) {
+    const page = resolvePage(String(args.page ?? ''))
+    const result = renamePage({ ...AI }, page.id, String(args.name ?? ''))
+    if (!result.ok) throw new Error(result.reason)
+    return { ok: true, pageId: page.id, name: result.name, undoable: true }
+  },
+
+  delete_page(args) {
+    const page = resolvePage(String(args.page ?? ''))
+    const result = deletePage({ ...AI }, page.id)
+    if (!result.ok) throw new Error(result.reason)
+    return { ...result, undoable: true }
   },
 
   set_tokens(args) {
