@@ -149,6 +149,81 @@ describe('handleMcpRequest — concurrency (issue #1)', () => {
   })
 })
 
+describe('handleMcpRequest — batches (issue #2)', () => {
+  it('returns an array of 2 results for a batch of 2 valid calls', async () => {
+    const res = await handleMcpRequest(
+      post([callMessage(1, 'one'), callMessage(2, 'two')]),
+      server,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as RpcResult[]
+    expect(Array.isArray(body)).toBe(true)
+    expect(body).toHaveLength(2)
+
+    const byId = new Map(body.map((m) => [m.id, m]))
+    expect(resultText(byId.get(1))).toBe('one')
+    expect(resultText(byId.get(2))).toBe('two')
+  })
+
+  it('matches results to ids regardless of completion order', async () => {
+    // First entry is slow, second is fast. Responses must still be id-keyed.
+    const res = await handleMcpRequest(
+      post([callMessage(1, 'slow-one', 'slow', { delayMs: 50 }), callMessage(2, 'fast-two', 'echo')]),
+      server,
+    )
+    const body = (await res.json()) as RpcResult[]
+    const byId = new Map(body.map((m) => [m.id, m]))
+    expect(resultText(byId.get(1))).toBe('slow-one')
+    expect(resultText(byId.get(2))).toBe('fast-two')
+  })
+
+  it('returns a per-entry error for an invalid entry in a batch', async () => {
+    const res = await handleMcpRequest(post([callMessage(1, 'valid'), 'not-an-object']), server)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as RpcResult[]
+    expect(body).toHaveLength(2)
+
+    const valid = body.find((m) => m.id === 1)
+    expect(resultText(valid)).toBe('valid')
+
+    const invalid = body.find((m) => m.error)
+    expect(invalid?.error?.code).toBe(-32600)
+  })
+
+  it('returns -32600 for an empty batch', async () => {
+    const res = await handleMcpRequest(post([]), server)
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error.code).toBe(-32600)
+    expect(body.id).toBeNull()
+  })
+
+  it('omits notification entries from the batch response', async () => {
+    const res = await handleMcpRequest(
+      post([
+        callMessage(1, 'kept'),
+        { jsonrpc: '2.0', method: 'notifications/initialized' },
+      ]),
+      server,
+    )
+    const body = (await res.json()) as RpcResult[]
+    expect(body).toHaveLength(1)
+    expect(body[0].id).toBe(1)
+  })
+
+  it('returns 202 when a batch contains only notifications', async () => {
+    const res = await handleMcpRequest(
+      post([
+        { jsonrpc: '2.0', method: 'notifications/initialized' },
+        { jsonrpc: '2.0', method: 'notifications/progress', params: {} },
+      ]),
+      server,
+    )
+    expect(res.status).toBe(202)
+    expect(await res.text()).toBe('')
+  })
+})
+
 describe('handleMcpRequest — malformed input', () => {
   it('returns -32600 for a non-array, non-object body', async () => {
     const res = await handleMcpRequest(post('just a string'), server)

@@ -146,6 +146,35 @@ export async function handleMcpRequest(request: Request, server: McpServer): Pro
     const body: unknown = await request.json()
     const connection = await getConnection(server)
 
+    // JSON-RPC 2.0 batch: an array of requests/notifications.
+    if (Array.isArray(body)) {
+      if (body.length === 0) {
+        // Empty batch is an invalid request per spec.
+        return Response.json(errorResponse(-32600, 'Invalid Request: empty batch', null), {
+          status: 400,
+        })
+      }
+
+      const responses = await Promise.all(
+        body.map(async (entry): Promise<JSONRPCMessage | null> => {
+          if (!isJsonRpcObject(entry)) {
+            return errorResponse(
+              -32600,
+              'Invalid Request: batch entry is not a JSON-RPC object',
+              null,
+            ) as unknown as JSONRPCMessage
+          }
+          return dispatch(connection, entry)
+        }),
+      )
+
+      // Omit responses for notifications (null). If every entry was a
+      // notification, the batch yields no response body per spec.
+      const payload = responses.filter((r): r is JSONRPCMessage => r !== null)
+      if (payload.length === 0) return new Response(null, { status: 202 })
+      return Response.json(payload)
+    }
+
     if (!isJsonRpcObject(body)) {
       return Response.json(errorResponse(-32600, 'Invalid Request', null), { status: 400 })
     }
