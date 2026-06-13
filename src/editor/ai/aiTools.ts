@@ -619,6 +619,31 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
                  : 'Family not found on Google Fonts (kept in the document; verify the name)' }
   },
 
+  async import_asset(args) {
+    const name = String(args.name ?? 'asset').slice(0, 80)
+    let dataUrl = args.dataUrl ? String(args.dataUrl) : ''
+    if (!dataUrl && args.url) {
+      const res = await fetch(String(args.url))
+      if (!res.ok) throw new Error(`Failed to fetch asset: HTTP ${res.status}`)
+      const blob = await res.blob()
+      dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(new Error('Failed to read asset bytes'))
+        reader.readAsDataURL(blob)
+      })
+    }
+    const match = /^data:([\w/+.-]+);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl)
+    if (!match) throw new Error('Provide an image as a base64 `dataUrl` (data:image/...;base64,...) or a fetchable `url`')
+    const mime = match[1]
+    if (!mime.startsWith('image/')) throw new Error(`Unsupported asset type: ${mime} (images only)`)
+    const size = Math.floor((match[2].length * 3) / 4)
+    const id = genId('asset')
+    store.apply(`AI: import asset ${name}`, [{ t: 'addAsset', asset: { id, name, mime, size, url: dataUrl } }], 'ai')
+    return { ok: true, assetId: id, name, mime, size, url: dataUrl, undoable: true,
+      hint: 'Reference `url` in <img src="..."> or style="background-image: url(\'...\')".' }
+  },
+
   select_nodes(args) {
     const ids = (args.ids as string[]).filter((id) => store.doc.nodes[id])
     store.setSelection(ids)

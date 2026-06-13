@@ -272,6 +272,18 @@ server.registerTool('add_font', {
   },
 }, forward('add_font', 30_000))
 
+server.registerTool('import_asset', {
+  title: 'Import an image asset',
+  description:
+    'Store an image in the document so it can be referenced from <img src> or background-image. Pass a base64 data URL (data:image/...;base64,...) or a fetchable url. Returns a stable url to reference.',
+  inputSchema: {
+    project,
+    name: z.string().min(1).max(80).describe('Human-readable asset name'),
+    dataUrl: z.string().optional().describe('data:image/...;base64,... bytes'),
+    url: z.string().optional().describe('Remote image URL to fetch and inline (used if dataUrl is omitted)'),
+  },
+}, forward('import_asset', 30_000))
+
 // --- Targeted edits ---------------------------------------------------------
 
 server.registerTool('create_artboard', {
