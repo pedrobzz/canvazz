@@ -5,6 +5,7 @@ import { nodeElement } from '../canvas/geometry'
 import { exportHtml, exportJsx } from '../compiler/export'
 import { parseHtml, sanitizeStyle } from '../compiler/parse'
 import { sanitizeClasses } from '../compiler/allowlist'
+import { cssValuePolicyReject, isAllowedCssProp } from '../compiler/allowlist'
 import {
   deleteNodes, duplicateNodes, insertHtml, locate, renameNode, setTextContent,
 } from '../commands'
@@ -320,14 +321,46 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       requireNode(id)
       const safe: Record<string, string | null> = {}
       for (const [prop, value] of Object.entries(set)) {
+        const key = prop.toLowerCase().trim()
         if (value === null) {
-          safe[prop] = null
+          // Removals only touch known props; an unknown name can't be set.
+          if (isAllowedCssProp(key)) safe[key] = null
+          else rejected.push(`${id}:${prop} (unknown property)`)
           continue
         }
-        const sanitized = sanitizeStyle(`${prop}: ${value}`)
-        const key = Object.keys(sanitized)[0]
-        if (key) safe[key] = sanitized[key]
-        else rejected.push(`${id}:${prop}`)
+        if (!isAllowedCssProp(key)) {
+          rejected.push(`${id}:${prop} (unknown property)`)
+          continue
+        }
+        // Layout-model policy (position: fixed/sticky) before the cheaper checks
+        // so the reason is specific.
+        const policy = cssValuePolicyReject(key, value)
+        if (policy) {
+          rejected.push(`${id}:${prop} (${policy})`)
+          continue
+        }
+        // Run the same url()/security sanitizer parse-time inline styles get.
+        const sanitized = sanitizeStyle(`${key}: ${value}`)
+        const cleaned = sanitized[key]
+        if (cleaned === undefined) {
+          rejected.push(`${id}:${prop} (invalid value)`)
+          continue
+        }
+        // We run in a real browser — let the engine reject bogus values
+        // ("banana") that the allowlist can't catch. CSS.supports natively
+        // understands var()/calc()/gradients. Guarded so vitest/node (no CSS)
+        // accept-by-default and never break. Custom properties (--token) accept
+        // any value by spec, so skip the engine check for them.
+        if (
+          !key.startsWith('--') &&
+          typeof CSS !== 'undefined' &&
+          typeof CSS.supports === 'function' &&
+          !CSS.supports(key, cleaned)
+        ) {
+          rejected.push(`${id}:${prop} (invalid value)`)
+          continue
+        }
+        safe[key] = cleaned
       }
       if (Object.keys(safe).length > 0) ops.push({ t: 'setStyle', id, set: safe })
     }
