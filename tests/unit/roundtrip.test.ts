@@ -61,16 +61,23 @@ describe('sanitizer', () => {
     expect(dropped).toContain('url:href')
   })
 
-  it('rejects unsupported and dangerous CSS, keeps allowed CSS', () => {
+  it('rejects unsupported and dangerous CSS, strips external url(), keeps allowed CSS', () => {
+    const dropped: string[] = []
     const style = sanitizeStyle(
       `width: 10px; behavior: url(#default#time2); background: url(javascript:alert(1)); ` +
         `background-image: url("https://ok.example/x.png"); -weird-prop: 1; color: red`,
+      dropped,
     )
+    // External http(s) url() is now stripped uniformly (was kept before),
+    // leaving an empty background-image declaration that drops out.
     expect(style).toEqual({
       width: '10px',
-      'background-image': 'url("https://ok.example/x.png")',
       color: 'red',
     })
+    expect(dropped).toContain('css:behavior')
+    expect(dropped).toContain('css:-weird-prop')
+    expect(dropped).toContain('css:background') // javascript: payload, dropped whole
+    expect(dropped).toContain('css:background-image url(external)')
   })
 
   it('keeps tailwind classes but drops dangerous tokens', () => {

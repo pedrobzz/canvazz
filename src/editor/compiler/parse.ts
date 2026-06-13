@@ -4,11 +4,14 @@ import {
   SVG_ATTRS,
   SVG_TAGS,
   URL_ATTRS,
+  classifyUrl,
+  cssValuePolicyReject,
   isAllowedAttr,
   isAllowedCssProp,
   isSafeAttrValue,
   isSafeCssValue,
   sanitizeClasses,
+  sanitizeCssUrls,
   sanitizeUrl,
 } from './allowlist'
 import { genId } from '../model/ids'
@@ -27,6 +30,12 @@ export interface ParseResult {
   nodes: NodeModel[]
   rootIds: string[]
   dropped: string[]
+  /**
+   * Non-fatal notices: input that was KEPT but the caller should know about,
+   * e.g. an external `<img src>` that makes the canvas depend on the network.
+   * Optional/additive so downstream callers can ignore it safely.
+   */
+  warnings?: string[]
 }
 
 export interface ParseOptions {
@@ -72,14 +81,59 @@ export function sanitizeStyle(
   dropped?: string[],
 ): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const [prop, value] of parseStyleAttr(text)) {
-    if (isAllowedCssProp(prop) && isSafeCssValue(value)) out[prop] = value
-    else dropped?.push(`css:${prop}`)
+  for (const [prop, rawValue] of parseStyleAttr(text)) {
+    if (!isAllowedCssProp(prop)) {
+      dropped?.push(`css:${prop}`)
+      continue
+    }
+    // Hard security check on the RAW value first: catches javascript:/
+    // expression()/@import/control chars even when buried inside a url(), so
+    // the url stripper can never mangle a payload into something that slips by.
+    if (!isSafeCssValue(rawValue)) {
+      dropped?.push(`css:${prop}`)
+      continue
+    }
+    // Layout-model policy (position: fixed/sticky) — reject with a clear reason
+    // so it never silently applies.
+    if (cssValuePolicyReject(prop, rawValue)) {
+      dropped?.push(`css:${prop} (disallowed value)`)
+      continue
+    }
+    // One url() policy for every url-bearing declaration (shorthand and
+    // longhand alike): keep data:/asset://#frag/relative, strip external
+    // http(s) and anything unsafe, and report each removed reference.
+    const { value, dropped: urlDropped } = sanitizeCssUrls(rawValue)
+    for (const cls of urlDropped) dropped?.push(`css:${prop} url(${cls})`)
+    // An empty value after stripping every url() means the declaration carried
+    // nothing but external refs — drop it rather than emit `prop: `.
+    if (value === '') {
+      if (urlDropped.length === 0) dropped?.push(`css:${prop}`)
+      continue
+    }
+    out[prop] = value
   }
   return out
 }
 
 const ID_RE = /^[\w-]{1,64}$/
+
+/**
+ * SVG presentation attributes that are also CSS properties. When such an
+ * attribute carries a `var(--token)`, CSS custom properties do NOT resolve in
+ * the *attribute* form (they paint nothing), but they resolve naturally when
+ * moved into inline `style`. We relocate only var()-bearing values here; plain
+ * literals (`stroke="#f00"`) stay as attributes so the model is unchanged.
+ */
+const SVG_PRESENTATION_CSS_ATTRS = new Set([
+  'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
+  'stroke-dasharray', 'stroke-dashoffset', 'fill-opacity', 'stroke-opacity',
+  'fill-rule', 'clip-rule', 'opacity', 'stop-color', 'stop-opacity',
+  'color', 'paint-order', 'vector-effect',
+  'font-size', 'font-family', 'font-weight', 'letter-spacing',
+  'text-anchor', 'dominant-baseline',
+])
+
+const VAR_RE = /var\s*\(/i
 
 const TAG_NAMES: Record<string, string> = {
   svg: 'Vector', path: 'Path', circle: 'Circle', rect: 'Rect', line: 'Line',
@@ -107,6 +161,7 @@ function defaultName(tag: string, text?: string): string {
  */
 export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
   const dropped: string[] = []
+  const warnings: string[] = []
   const nodes: NodeModel[] = []
   const usedIds = new Set<string>()
 
@@ -159,6 +214,11 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     }
     if (!isSvgEl && !ALLOWED_TAGS.has(tag)) dropped.push(`tag:${tag}->div`)
 
+    // SVG presentation attrs carrying var() are relocated to inline style so
+    // tokens resolve; collected here and merged after the loop (inline style,
+    // if also present, wins).
+    const relocatedStyle: Record<string, string> = {}
+
     for (const attr of Array.from(el.attributes)) {
       // SVG attribute names are case-sensitive (viewBox); HTML's lowercase.
       const name = isSvgEl ? attr.name : attr.name.toLowerCase()
@@ -179,19 +239,43 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
         dropped.push(`attr:${name}`)
       } else if (isSvgEl) {
         if (SVG_ATTRS.has(name) && isSafeAttrValue(attr.value)) {
-          node.attrs[name] = attr.value.slice(0, 4000)
+          // var() does not resolve in SVG presentation *attributes* (paints
+          // nothing). Relocate token-bearing presentation values to inline
+          // style, where custom properties resolve and live-update. Literals
+          // stay as attributes so the model is otherwise untouched.
+          if (SVG_PRESENTATION_CSS_ATTRS.has(name) && VAR_RE.test(attr.value)) {
+            relocatedStyle[name] = attr.value.slice(0, 4000)
+          } else {
+            node.attrs[name] = attr.value.slice(0, 4000)
+          }
         } else if (!name.startsWith('data-')) {
           dropped.push(`attr:${name}`)
         }
       } else if (URL_ATTRS.has(name)) {
         const safe = sanitizeUrl(attr.value)
-        if (safe !== null) node.attrs[name] = safe
-        else dropped.push(`url:${name}`)
+        if (safe !== null) {
+          node.attrs[name] = safe
+          // External <img src> is kept (placeholders are a legit agent flow)
+          // but the canvas now depends on the network — surface it so agents
+          // can switch to a real asset. href to external sites is normal; no
+          // warning there.
+          if (name === 'src' && classifyUrl(safe) === 'external') {
+            warnings.push(
+              `img src kept: external url (${safe}) — canvas now depends on the network; prefer import_asset`,
+            )
+          }
+        } else dropped.push(`url:${name}`)
       } else if (isAllowedAttr(name)) {
         node.attrs[name] = attr.value.slice(0, 1000)
       } else if (!name.startsWith('data-')) {
         dropped.push(`attr:${name}`)
       }
+    }
+
+    // Fold relocated var() presentation values into inline style. An explicit
+    // inline `style` declaration for the same property wins (author intent).
+    if (Object.keys(relocatedStyle).length > 0) {
+      node.style = { ...relocatedStyle, ...node.style }
     }
 
     nodes.push(node)
@@ -244,5 +328,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     }
   }
 
-  return { nodes, rootIds, dropped }
+  return warnings.length > 0
+    ? { nodes, rootIds, dropped, warnings }
+    : { nodes, rootIds, dropped }
 }

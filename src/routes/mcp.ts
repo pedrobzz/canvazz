@@ -301,7 +301,7 @@ server.registerTool('create_artboard', {
 server.registerTool('write_html', {
   title: 'Write HTML to the canvas',
   description:
-    'Insert or replace real HTML/CSS/Tailwind, including a sanitized SVG subset (svg/path/circle/rect/gradients — use/foreignObject/external refs are stripped). Sanitized (scripts/handlers/unsafe CSS stripped — strip reasons returned), parsed into the model, and rendered live. Prefer several small writes over one giant one so the user sees progress. Use style="position:absolute; left/top" for free placement inside artboards, or flex containers for auto-layout.',
+    'Insert or replace real HTML/CSS/Tailwind, including a sanitized SVG subset (svg/path/circle/rect/gradients — use/foreignObject/external refs are stripped). Sanitized (scripts/handlers/unsafe CSS stripped — strip reasons returned in `dropped`), parsed into the model, and rendered live. url() policy is uniform across every property (background shorthand and longhand alike): data: and asset://<id> are kept; external http(s) url() in CSS is stripped and reported. External <img src> is kept for placeholders but reported in `warnings` (the canvas then depends on the network — prefer a real asset). SVG presentation attrs using var(--token) (e.g. stroke="var(--brand)") are relocated to inline style so tokens resolve and paint. position: fixed/sticky is rejected — use absolute. Prefer several small writes over one giant one so the user sees progress. Use style="position:absolute; left/top" for free placement inside artboards, or flex containers for auto-layout.',
   inputSchema: {
     project,
     html: z.string().min(1).describe('HTML fragment. data-cz-name sets layer names.'),
@@ -314,7 +314,7 @@ server.registerTool('write_html', {
 server.registerTool('update_styles', {
   title: 'Update inline styles',
   description:
-    'Set/remove inline CSS on specific nodes. Batched into one undoable transaction. Use kebab-case props; null removes. Rejected (unsafe/unknown) props are reported.',
+    'Set/remove inline CSS on specific nodes. Batched into one undoable transaction. Use kebab-case props; null removes. Values are validated in the browser (CSS.supports), so bogus values like "flex-grow: banana" are caught instead of silently no-oping. Rejected entries are returned in `rejected` with a reason: "<id>:<prop> (unknown property)" | "(invalid value)" | "(disallowed value — use absolute)". position: fixed/sticky is rejected (escapes the canvas layout model — use absolute). var(--token), calc(), and gradients are supported.',
   inputSchema: {
     project,
     updates: z.array(z.object({
