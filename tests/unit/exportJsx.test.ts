@@ -97,8 +97,8 @@ function componentDoc(): DocumentModel {
 describe('JSX component emission (#10c)', () => {
   it('emits one component function plus the root, instances as elements', () => {
     const jsx = exportJsx(componentDoc(), 'page')
-    // Exactly one StatCard definition (not duplicated 4x).
-    expect(jsx.match(/function StatCard\(\)/g)?.length).toBe(1)
+    // Exactly one StatCard definition (not duplicated 4x); it consumes props.
+    expect(jsx.match(/function StatCard\(props\)/g)?.length).toBe(1)
     expect(jsx).toContain('export function Dashboard()')
     // Four instances render as <StatCard .../> elements.
     expect(jsx.match(/<StatCard\b/g)?.length).toBe(4)
@@ -106,11 +106,15 @@ describe('JSX component emission (#10c)', () => {
     expect(jsx.match(/<span/g)?.length).toBe(1)
   })
 
-  it('surfaces per-instance text overrides as props', () => {
+  it('surfaces per-instance text overrides as props the component consumes', () => {
     const jsx = exportJsx(componentDoc(), 'page')
     expect(jsx).toContain('label="Users"')
     expect(jsx).toContain('label="Sales"')
     expect(jsx).toContain('label="Churn"')
+    // The function body actually reads the prop, defaulting to the definition.
+    expect(jsx).toContain("{props.label ?? 'Revenue'}")
+    // An instance with no override passes no label prop (falls back to default).
+    expect(jsx).toMatch(/<StatCard style=\{\{ left: '210px', top: '120px' \}\} \/>/)
   })
 
   it('rides per-instance placement as an inline style prop on the element', () => {

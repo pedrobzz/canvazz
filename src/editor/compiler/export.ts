@@ -297,6 +297,12 @@ interface JsxCtx {
   opts: ExportOptions
   /** Component functions to emit, keyed by their PascalCase name. */
   components: Map<string, string>
+  /**
+   * Active only while rendering a component body: text leaf sourceId -> prop
+   * name. A matched leaf emits `{props.name ?? 'default'}` so the function
+   * actually consumes the props its instances pass.
+   */
+  textSlots?: Map<string, string>
 }
 
 /**
@@ -309,7 +315,7 @@ function resolvedToJsx(node: ResolvedNode, ctx: JsxCtx, depth: number): string {
   return emitPlainJsx(node, ctx, depth, node.style)
 }
 
-/** Plain element markup. `styleOverride` lets the root inject token vars. */
+/** Plain element markup. `styleSource` lets the root inject token vars. */
 function emitPlainJsx(
   node: ResolvedNode,
   ctx: JsxCtx,
@@ -334,6 +340,13 @@ function emitPlainJsx(
   const attrs = parts.length > 0 ? ' ' + parts.join(' ') : ''
   if (VOID_TAGS.has(node.tag)) return `${pad}<${node.tag}${attrs} />`
   if (node.children.length === 0) {
+    if (node.text === undefined) return `${pad}<${node.tag}${attrs} />`
+    // Inside a component body, a named text slot consumes the matching prop.
+    const propName = ctx.textSlots?.get(node.sourceId)
+    if (propName !== undefined) {
+      const fallback = node.text.replaceAll('\\', '\\\\').replaceAll("'", "\\'")
+      return `${pad}<${node.tag}${attrs}>{props.${propName} ?? '${fallback}'}</${node.tag}>`
+    }
     const text = node.text ? escapeJsxText(node.text) : ''
     return text
       ? `${pad}<${node.tag}${attrs}>${text}</${node.tag}>`
@@ -383,16 +396,28 @@ function ensureComponent(node: ResolvedNode, ctx: JsxCtx): string {
   ctx.components.set(compName, '')
   const defRoot = def ? resolveNode(ctx.doc, def.rootId) : null
   const root = defRoot ?? node
+  // Map each text leaf to a prop name so the body consumes the props its
+  // instances pass; the same names key the instance-element props (textProps).
+  const slots = textSlotProps(root)
+  const usesProps = slots.size > 0
   // Strip the def root's placement (the instance element supplies it) and
   // render its subtree as plain markup; nested instances still fold to <X/>.
   const body = emitPlainJsx(
     { ...root, componentId: undefined },
-    ctx,
+    { ...ctx, textSlots: slots },
     2,
     stripPlacementStyle(root.style),
   )
-  ctx.components.set(compName, `function ${compName}() {\n  return (\n${body}\n  )\n}`)
+  const param = usesProps ? 'props' : ''
+  ctx.components.set(compName, `function ${compName}(${param}) {\n  return (\n${body}\n  )\n}`)
   return compName
+}
+
+/** Text leaf sourceId -> prop name for a component definition root. */
+function textSlotProps(defRoot: ResolvedNode): Map<string, string> {
+  const out = new Map<string, string>()
+  collectTextSlots(defRoot).forEach((slot, i) => out.set(slot.sourceId, propNameFor(slot.name, i)))
+  return out
 }
 
 const PLACEMENT = ['position', 'left', 'top', 'right', 'bottom', 'translate']
