@@ -590,6 +590,46 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       hint: loaded ? `Use font-family: '${family}', sans-serif` : 'Family not found on Google Fonts (kept in the document; verify the name)' }
   },
 
+  import_asset(args) {
+    // Accept a full data: URL, or base64 bytes + a mime type.
+    const dataUrl = typeof args.dataUrl === 'string' ? args.dataUrl : null
+    const rawBase64 = typeof args.base64 === 'string' ? args.base64 : null
+    const mimeArg = typeof args.mime === 'string' ? args.mime : null
+    let mime: string
+    let url: string
+    if (dataUrl) {
+      const match = /^data:([^;,]+)(;base64)?,/.exec(dataUrl)
+      if (!match) throw new Error('dataUrl must be a data: URL, e.g. data:image/png;base64,…')
+      mime = match[1]
+      url = dataUrl
+    } else if (rawBase64 && mimeArg) {
+      mime = mimeArg
+      url = `data:${mimeArg};base64,${rawBase64}`
+    } else {
+      throw new Error('Provide a data: URL via dataUrl, or base64 + mime.')
+    }
+    // Byte count from the base64 payload (3 bytes per 4 chars, less padding).
+    const base64 = url.slice(url.indexOf(',') + 1)
+    const padding = (base64.match(/=+$/)?.[0].length) ?? 0
+    const bytes = Math.max(0, Math.floor((base64.length * 3) / 4) - padding)
+    const assetId = genId('asset')
+    const name = String(args.name ?? '').trim() || `asset.${mime.split('/')[1] ?? 'bin'}`
+    store.apply('AI: import asset', [
+      { t: 'addAsset', asset: { id: assetId, name, mime, size: bytes, url } },
+    ], 'ai')
+    const ref = `asset://${assetId}`
+    return {
+      ok: true,
+      assetId,
+      url: ref,
+      bytes,
+      mime,
+      name,
+      undoable: true,
+      hint: `Reference it by the short handle, e.g. <img src="${ref}"> or background-image: url(${ref}). The bytes are stored once; reuse the handle freely.`,
+    }
+  },
+
   select_nodes(args) {
     const ids = (args.ids as string[]).filter((id) => store.doc.nodes[id])
     store.setSelection(ids)

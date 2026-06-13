@@ -433,6 +433,19 @@ server.registerTool('export', {
   },
 }, forward('export'))
 
+server.registerTool('import_asset', {
+  title: 'Import an image asset',
+  description:
+    'Store an image once and get a stable handle. Pass a data: URL (dataUrl) or base64 + mime. Returns asset://<id> — reference it from <img src="asset://…"> or background-image: url(asset://…); the bytes are stored once and inlined at export/render, so reusing the handle costs nothing.',
+  inputSchema: {
+    project,
+    dataUrl: z.string().optional().describe('A data: URL, e.g. data:image/png;base64,…'),
+    base64: z.string().optional().describe('Raw base64 bytes (requires mime).'),
+    mime: z.string().optional().describe('MIME type when passing base64, e.g. image/png.'),
+    name: z.string().optional().describe('Display name for the layer/asset panel.'),
+  },
+}, forward('import_asset'))
+
 server.registerTool('undo', {
   title: 'Undo last edit',
   description: 'Revert the most recent transaction (yours or the user’s — check the log via finish first if unsure).',
