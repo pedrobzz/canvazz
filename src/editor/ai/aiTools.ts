@@ -22,9 +22,11 @@ import type { ChartDatum, ChartType } from '../charts'
 import { DEFAULT_WEIGHTS, isSystemFont, isValidFamily, SYSTEM_FONTS, syncDocumentFonts, verifyFontLoaded } from '../fonts'
 import { genId } from '../model/ids'
 import { createArtboard } from '../model/factory'
+import { resolveNode } from '../model/instances'
+import type { ResolvedNode } from '../model/instances'
 import { editorStore } from '../store/editorStore'
 import type { EditorStore } from '../store/editorStore'
-import type { FlowLink, NodeId, NodeLocation, NodeModel, Op } from '../model/types'
+import type { DocumentModel, FlowLink, NodeId, NodeLocation, NodeModel, Op } from '../model/types'
 
 /**
  * Browser-side executors for MCP tools. Every mutation goes through the
@@ -69,6 +71,33 @@ function summarize(id: NodeId): Json | null {
 
 const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s)
 
+/**
+ * Overridable slots of an instance: every internal node (not the root) with the
+ * `sourceId` that set_instance_overrides keys on, plus its `pathId` for reads
+ * and a content hint. Lets callers discover override targets instead of having
+ * to remember the original write's createdNodes ids.
+ */
+function slotsOf(doc: DocumentModel, instanceId: NodeId): Json[] {
+  const resolved = resolveNode(doc, instanceId)
+  if (!resolved) return []
+  const out: Json[] = []
+  const walk = (n: ResolvedNode, isRoot: boolean) => {
+    if (!isRoot) {
+      out.push({
+        sourceId: n.sourceId,
+        pathId: n.pathId,
+        name: n.name,
+        tag: n.tag,
+        ...(n.text !== undefined ? { text: truncate(n.text, 60) } : {}),
+        ...(n.attrs['data-cz-icon'] ? { icon: n.attrs['data-cz-icon'] } : {}),
+      })
+    }
+    n.children.forEach((c) => walk(c, false))
+  }
+  walk(resolved, true)
+  return out
+}
+
 function mutationResult(label: string, changed: NodeId[]): Json {
   return {
     ok: true,
@@ -83,6 +112,15 @@ function requireNode(id: NodeId): NodeModel {
   const node = store.doc.nodes[id]
   if (!node) throw new Error(`Unknown node id: ${id}. Use get_tree_summary to list valid ids.`)
   return node
+}
+
+/**
+ * The node-reference argument under whichever alias the caller used. The tool
+ * surface has historically named it id/nodeId/targetId in different places, so
+ * single-node tools accept any of them rather than silently ignoring a near-miss.
+ */
+function refId(args: Json): string | undefined {
+  return (args.id ?? args.nodeId ?? args.targetId) as string | undefined
 }
 
 function treeSummary(id: NodeId, depth: number, maxDepth: number): string[] {
@@ -240,29 +278,35 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   get_children(args) {
-    const node = requireNode(args.id as string)
+    const node = requireNode(refId(args) as string)
     return { id: node.id, children: node.children.map(summarize) }
   },
 
   get_node_info(args) {
-    const node = requireNode(args.id as string)
+    const node = requireNode(refId(args) as string)
+    // An instance derives its subtree from the component definition, so
+    // node.children is empty. Resolve it and surface the overridable slots —
+    // the `sourceId`s that set_instance_overrides keys on — so callers don't
+    // have to remember the original write's createdNodes ids.
+    const overridableSlots = node.componentId ? slotsOf(store.doc, node.id) : undefined
     return {
       ...node,
       rect: rectOf(node.id),
       parentSummary: node.parent ? summarize(node.parent) : null,
       childSummaries: node.children.map(summarize),
+      ...(overridableSlots ? { overridableSlots } : {}),
     }
   },
 
   async get_html(args) {
-    const id = args.id as string
+    const id = refId(args) as string
     requireNode(id)
     await ensureIconRegistries() // icon overrides export exact glyph content
     return { html: exportHtml(store.doc, id) }
   },
 
   async get_jsx(args) {
-    const id = args.id as string
+    const id = refId(args) as string
     requireNode(id)
     await ensureIconRegistries()
     // Production JSX: real components, camelCase SVG attrs, no data-cz-* unless asked.
@@ -270,35 +314,46 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   get_computed_styles(args) {
-    const id = args.id as string
+    const id = refId(args) as string
     requireNode(id)
     const w = world()
     const el = w ? nodeElement(w, id) : null
     if (!el) throw new Error(`Node ${id} is not rendered (hidden ancestor or wrong page).`)
     const cs = getComputedStyle(el)
-    const props = (args.properties as string[] | undefined) ?? [
+    const defaults = [
       'display', 'position', 'width', 'height', 'padding', 'margin', 'gap',
       'flex-direction', 'align-items', 'justify-content', 'font-size', 'font-weight',
       'line-height', 'color', 'background-color', 'border-radius', 'border',
       'box-shadow', 'opacity', 'overflow', 'transform',
     ]
+    // SVG nodes (icons, chart lines/arcs) paint via fill/stroke, not
+    // background/color — surface those so callers can verify vector color.
+    if (el instanceof SVGElement) {
+      defaults.push(
+        'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
+        'stroke-dasharray', 'stroke-dashoffset', 'fill-opacity', 'stroke-opacity', 'paint-order',
+      )
+    }
+    const props = (args.properties as string[] | undefined) ?? defaults
     const styles: Record<string, string> = {}
     for (const p of props) styles[p] = cs.getPropertyValue(p)
     return { id, rect: rectOf(id), computed: styles }
   },
 
   async get_screenshot(args) {
-    const id = args.id as string | undefined
+    const id = refId(args) as string | undefined
     const w = world()
     if (!w) throw new Error('Canvas not mounted')
     let el: HTMLElement | null
+    let targetId: NodeId | undefined
     if (id) {
       requireNode(id)
       el = nodeElement(w, id)
+      targetId = id
     } else {
       const page = store.activePage()
-      const firstArtboard = page.children.find((n) => store.doc.nodes[n]?.isArtboard)
-      el = firstArtboard ? nodeElement(w, firstArtboard) : null
+      targetId = page.children.find((n) => store.doc.nodes[n]?.isArtboard)
+      el = targetId ? nodeElement(w, targetId) : null
     }
     if (!el) throw new Error('Nothing to screenshot — create an artboard first.')
 
@@ -307,50 +362,32 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     // Crop region (node-relative px) clamped into the node box. Default: whole node.
     const region = clampRegion(args.region as Json | undefined, fullW, fullH)
     const maxEdge = Math.max(1, Math.min(4096, Number(args.maxEdge) || 1200))
-    // scale, if given, is honored up to the maxEdge ceiling; otherwise we
-    // downscale only when the long edge exceeds maxEdge (1:1 below that).
+    // Default: downscale only when the long edge exceeds maxEdge (1:1 below).
+    // An explicit `scale` is honored in BOTH directions — including >1 for
+    // hi-dpi crops — up to the maxEdge ceiling.
+    const longEdge = Math.max(region.width, region.height, 1)
     const requested = Number(args.scale)
-    const fit = Math.min(1, maxEdge / Math.max(region.width, region.height, 1))
-    const scale = requested > 0 ? Math.min(requested, fit) : fit
+    const scale = requested > 0 ? Math.min(requested, maxEdge / longEdge) : Math.min(1, maxEdge / longEdge)
 
     const warnings: string[] = []
     const bg = effectiveBackground(el, warnings)
-    // Capture the full node at the target scale, then crop to the region.
-    // Neutralize the node's canvas placement (absolute left/top) WITHOUT
-    // forcing `static`: static stops the node being a containing block, so an
-    // absolutely-positioned child (a hero <h1>) re-anchors to an outer ancestor
-    // and vanishes from the box. `relative` with zero offsets renders at the
-    // same origin yet still contains abs children. `flow-root` adds a block
-    // formatting context so a plain block's child top-margin can't collapse out
-    // of the box and clip. pixelRatio < 1 renders blank, so downscale via the
-    // canvas dimensions.
-    const style: Record<string, string> = {
-      transform: 'none', rotate: 'none', position: 'relative', left: '0px', top: '0px', margin: '0',
-    }
-    const display = getComputedStyle(el).display
-    if (display === 'block' || display === 'inline-block' || display === 'inline') {
-      style.display = 'flow-root'
-    }
-    if (bg.image) style.backgroundImage = bg.image
-    const dataUrlFull = await toPng(el, {
-      pixelRatio: 1,
-      canvasWidth: Math.round(fullW * scale),
-      canvasHeight: Math.round(fullH * scale),
-      skipFonts: true,
-      backgroundColor: bg.color,
-      style,
-    })
+    const dataUrlFull = await captureNodePng(el, fullW, fullH, scale, bg)
 
     const cropped =
       region.x === 0 && region.y === 0 && region.width === fullW && region.height === fullH
         ? { dataUrl: dataUrlFull, width: Math.round(fullW * scale), height: Math.round(fullH * scale) }
         : await cropDataUrl(dataUrlFull, region, scale)
 
+    // Report the world-space rect actually captured (x/y were hard-anchored to
+    // 0 before, so multi-artboard callers had no idea what they got).
+    const worldRect = targetId ? rectOf(targetId) : null
     return {
       dataUrl: cropped.dataUrl,
       width: cropped.width,
       height: cropped.height,
-      capturedRect: region,
+      capturedRect: worldRect
+        ? { x: worldRect.x + region.x, y: worldRect.y + region.y, width: region.width, height: region.height }
+        : region,
       scale: Math.round(scale * 1000) / 1000,
       ...(warnings.length ? { warnings } : {}),
     }
@@ -479,8 +516,10 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       const safe: Record<string, string | null> = {}
       for (const [prop, value] of Object.entries(set)) {
         const key = prop.toLowerCase().trim()
-        if (value === null) {
-          // Removals only touch known props; an unknown name can't be set.
+        // null OR an empty/whitespace string removes the property (so a node can
+        // fall back to its default — e.g. clear `top` so `bottom` wins), matching
+        // the null=remove convention set_tokens already uses.
+        if (value === null || (typeof value === 'string' && value.trim() === '')) {
           if (isAllowedCssProp(key)) safe[key] = null
           else rejected.push(`${id}:${prop} (unknown property)`)
           continue
@@ -527,7 +566,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   set_classes(args) {
-    const id = args.id as string
+    const id = refId(args) as string
     requireNode(id)
     const classes = sanitizeClasses(String(args.classes ?? ''))
     store.apply('AI: set classes', [{ t: 'setClasses', id, classes }], 'ai')
@@ -535,7 +574,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   set_text_content(args) {
-    const id = args.id as string
+    const id = refId(args) as string
     requireNode(id)
     setTextContent({ ...AI }, id, String(args.text ?? ''))
     return mutationResult('set_text_content', [id])
@@ -621,7 +660,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   create_component(args) {
-    const id = args.nodeId as string
+    const id = (args.nodeId ?? args.id ?? args.targetId) as string
     requireNode(id)
     const created = createMainComponent({ ...AI }, [id])
     if (!created) throw new Error('Cannot create a component from this node (already a component/instance/artboard?)')
@@ -661,10 +700,13 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     const componentId = args.componentId as string
     if (!store.doc.components[componentId]) throw new Error(`Unknown component: ${componentId}`)
     const at = locationFor(args.parentId as string | undefined)
-    const instanceId = createInstance({ ...AI }, componentId, at, {
-      x: (args.x as number | undefined) ?? 0,
-      y: (args.y as number | undefined) ?? 0,
-    })
+    // Only place absolutely when an explicit position is given; otherwise let
+    // the instance flow inside its target container (see createInstance).
+    const position =
+      args.x !== undefined || args.y !== undefined
+        ? { x: Number(args.x) || 0, y: Number(args.y) || 0 }
+        : undefined
+    const instanceId = createInstance({ ...AI }, componentId, at, position)
     if (!instanceId) throw new Error('Failed to create instance')
     const inst = store.doc.nodes[instanceId]
     return {
@@ -750,6 +792,11 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     // parseHtml dedups against existing ids; track ids minted earlier in this
     // same batch too so two glyphs never collide before they are applied.
     const pending = new Set<string>()
+    // The ops apply in order, so two appends into the same container would both
+    // resolve to today's children.length and the second would insert before the
+    // first — reversing the batch. Track how many we've queued per target and
+    // offset each subsequent append so array order = layout order.
+    const queued = new Map<string, number>()
 
     for (const item of items) {
       const at = locationFor(item.targetId, item.index)
@@ -780,6 +827,13 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       }
       const tree = collectFrom(nodes, rootId)
       for (const n of tree) pending.add(n.id)
+      // Append in array order: bump the index for repeat appends into one target.
+      if (item.index === undefined) {
+        const key = at.kind === 'node' ? at.parent : `page:${at.pageId}`
+        const offset = queued.get(key) ?? 0
+        at.index = (at.index ?? 0) + offset
+        queued.set(key, offset + 1)
+      }
       ops.push({ t: 'insertTree', nodes: tree, rootId, at })
       createdIds.push(rootId)
       results.push({ name: item.name, ok: true, id: rootId })
@@ -835,7 +889,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   set_tokens(args) {
-    const set = args.set as Record<string, string | null>
+    const set = (args.set ?? args.tokens) as Record<string, string | null>
     if (!set || Object.keys(set).length === 0) throw new Error('set{} is required')
     const ops: Op[] = []
     const rejected: string[] = []
@@ -932,7 +986,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   async export(args) {
-    const id = args.id as string
+    const id = refId(args) as string
     requireNode(id)
     await ensureIconRegistries()
     const format = (args.format as string | undefined) ?? 'html'
@@ -1001,6 +1055,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       width: args.width as number | undefined,
       height: args.height as number | undefined,
       color: args.color as string | undefined,
+      colors: Array.isArray(args.colors) ? (args.colors as unknown[]).map(String) : undefined,
       trackColor: args.trackColor as string | undefined,
       labels: args.labels as boolean | undefined,
     })
@@ -1221,6 +1276,61 @@ function effectiveBackground(el: HTMLElement, warnings: string[]): { color?: str
   const resolved = resolveBackgroundLayers(backgroundLayers(el))
   warnings.push(...resolved.warnings)
   return { color: resolved.color, image: resolved.image }
+}
+
+/**
+ * Rasterize a canvas node to a PNG data URL. Two facts force a detached clone
+ * rather than `toPng(node)` directly:
+ *  - html-to-image cannot capture a top-level `position:absolute` node living
+ *    under the camera's world transform — it rasterizes the world-origin region
+ *    instead of the node, so any artboard not at (0,0) came back blank (#21).
+ *  - the document's tokens are CSS custom properties on `[data-canvas-world]`,
+ *    so a node detached from it loses them and SVG `fill`/`stroke: var(--token)`
+ *    paint nothing (fill → black, stroke → invisible) (#22).
+ * Cloning into a fixed, origin-anchored wrapper mounted outside the world
+ * transform — and re-declaring the tokens on it — fixes both at once. We
+ * neutralize the clone's own placement: `relative` (not `static`) keeps it a
+ * containing block for absolute children; `flow-root` stops a child's top
+ * margin collapsing out of the box and clipping; pixelRatio < 1 renders blank
+ * in html-to-image, so we downscale via the canvas dimensions instead.
+ */
+async function captureNodePng(
+  el: HTMLElement,
+  fullW: number,
+  fullH: number,
+  scale: number,
+  bg: { color?: string; image?: string },
+): Promise<string> {
+  const ownStyle = getComputedStyle(el)
+  const wrap = document.createElement('div')
+  wrap.style.cssText =
+    `position:fixed;left:0;top:0;z-index:-2147483648;pointer-events:none;width:${fullW}px;height:${fullH}px`
+  wrap.style.fontFamily = ownStyle.fontFamily
+  wrap.style.color = ownStyle.color
+  for (const [name, value] of Object.entries(store.doc.tokens)) {
+    wrap.style.setProperty(name.startsWith('--') ? name : `--${name}`, value)
+  }
+  const clone = el.cloneNode(true) as HTMLElement
+  Object.assign(clone.style, {
+    transform: 'none', rotate: 'none', position: 'relative', left: '0px', top: '0px', margin: '0',
+  })
+  if (ownStyle.display === 'block' || ownStyle.display === 'inline-block' || ownStyle.display === 'inline') {
+    clone.style.display = 'flow-root'
+  }
+  if (bg.image) clone.style.backgroundImage = bg.image
+  wrap.appendChild(clone)
+  document.body.appendChild(wrap)
+  try {
+    return await toPng(wrap, {
+      pixelRatio: 1,
+      canvasWidth: Math.round(fullW * scale),
+      canvasHeight: Math.round(fullH * scale),
+      skipFonts: true,
+      backgroundColor: bg.color,
+    })
+  } finally {
+    wrap.remove()
+  }
 }
 
 /** Crop a full-node PNG to a node-relative region (already in scaled px). */

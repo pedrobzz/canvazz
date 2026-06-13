@@ -31,19 +31,20 @@ describe('cssValuePolicyReject', () => {
 })
 
 describe('parse-time position policy', () => {
-  it('drops position: fixed from an inline style with a clear reason', () => {
+  it('drops position: fixed from an inline style with an actionable reason', () => {
     const dropped: string[] = []
     const style = sanitizeStyle('position: fixed; left: 0; top: 0', dropped)
     expect(style.position).toBeUndefined()
     expect(style.left).toBe('0')
-    expect(dropped).toContain('css:position (disallowed value)')
+    // The dropped reason carries the substitute, not a bare "disallowed value".
+    expect(dropped).toContain('css:position (disallowed value — use absolute)')
   })
 
   it('drops position: sticky too', () => {
     const dropped: string[] = []
     const style = sanitizeStyle('position: sticky', dropped)
     expect(style.position).toBeUndefined()
-    expect(dropped).toContain('css:position (disallowed value)')
+    expect(dropped).toContain('css:position (disallowed value — use absolute)')
   })
 
   it('keeps position: absolute', () => {

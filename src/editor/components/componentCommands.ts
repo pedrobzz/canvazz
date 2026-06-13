@@ -2,7 +2,7 @@ import { genId } from '../model/ids'
 import { DESIGN_SYSTEM_PAGE_ID } from '../model/doc'
 import {
   COMPONENT_SET_PAD, COMPONENT_SET_PAD_TOP, canonicalSourceId, componentSetStyle,
-  parsePathId, resolveNode,
+  parsePathId, pickPlacement, resolveNode,
 } from '../model/instances'
 import { px, fmtPx } from '../canvas/geometry'
 import { isLayoutContainer, locate } from '../commands'
@@ -51,7 +51,7 @@ export function createMainComponent(ctx: Ctx, selection: string[]): CreateCompon
   if (!loc) return null
 
   const componentId = genId('cmp')
-  const wasFlow = node.style.position !== 'absolute'
+  const pinned = node.style.position === 'absolute' || node.style.position === 'fixed'
   const ops: Op[] = []
 
   const dsPage = store.doc.pages.find((p) => p.id === DESIGN_SYSTEM_PAGE_ID)
@@ -72,19 +72,15 @@ export function createMainComponent(ctx: Ctx, selection: string[]): CreateCompon
     nextY = Math.max(nextY, top + height + 60)
   }
 
-  // The replacement instance mirrors the original's layout participation.
+  // The replacement instance mirrors the original's layout participation —
+  // including its full placement (a bottom/right-pinned bar stays pinned, not
+  // forced to top:0;left:0).
   const instance: NodeModel = {
     id: genId('inst'),
     name: node.name,
     tag: node.tag,
     attrs: {},
-    style: wasFlow
-      ? {}
-      : {
-          position: 'absolute',
-          left: node.style.left ?? '0px',
-          top: node.style.top ?? '0px',
-        },
+    style: pinned ? pickPlacement(node.style) : {},
     classes: [],
     children: [],
     parent: null,
@@ -110,17 +106,20 @@ export function createInstance(
   ctx: Ctx,
   componentId: string,
   at: NodeLocation,
-  position: { x: number; y: number },
+  position?: { x: number; y: number },
 ): NodeId | null {
   const { store } = ctx
   const def = store.doc.components[componentId]
   const defRoot = def ? store.doc.nodes[def.rootId] : null
   if (!def || !defRoot) return null
 
-  // Instances join the flow inside auto-layout containers; elsewhere they
-  // place absolutely at the requested position.
+  // An instance dropped INTO a container joins the flow when it is auto-layout,
+  // or whenever no explicit position is requested — piling instances absolutely
+  // at the container's (0,0) is never the intent. Place absolutely only with an
+  // explicit position, or at page level (which has no flow).
   const parentNode = at.kind === 'node' ? store.doc.nodes[at.parent] : null
-  const flow = parentNode ? isLayoutContainer(parentNode) : false
+  const flow = parentNode != null && (position === undefined || isLayoutContainer(parentNode))
+  const pos = position ?? { x: 0, y: 0 }
   const instance: NodeModel = {
     id: genId('inst'),
     name: def.name,
@@ -130,8 +129,8 @@ export function createInstance(
       ? {}
       : {
           position: 'absolute',
-          left: fmtPx(position.x),
-          top: fmtPx(position.y),
+          left: fmtPx(pos.x),
+          top: fmtPx(pos.y),
           ...(defRoot.style.width ? { width: defRoot.style.width } : {}),
           ...(defRoot.style.height ? { height: defRoot.style.height } : {}),
         },

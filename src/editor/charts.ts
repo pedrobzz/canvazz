@@ -24,6 +24,8 @@ export interface ChartSpec {
   height?: number
   /** Series / fill color (CSS color or var(--token)). */
   color?: string
+  /** Per-slice/series colors (CSS or var(--token)); index-aligned with data. */
+  colors?: string[]
   /** Donut unfilled-track color. */
   trackColor?: string
   /** Render value/category labels where the chart type supports them. */
@@ -56,12 +58,23 @@ const u = (n: number): string => `${Math.round(n * 100) / 100}`
  * straddles it, otherwise at the smaller extreme, so bars grow from a sensible
  * floor and a single-point series still has a non-degenerate scale.
  */
-function scaleOf(values: number[], span: number) {
+function scaleOf(values: number[], span: number, zeroAnchored = true) {
   let min = Math.min(...values)
   let max = Math.max(...values)
   if (!Number.isFinite(min) || !Number.isFinite(max)) { min = 0; max = 0 }
-  const base = min < 0 && max > 0 ? 0 : Math.min(min, 0)
-  const top = Math.max(max, base)
+  let base: number
+  let top: number
+  if (zeroAnchored) {
+    // Bars grow from a zero floor (or the smaller extreme when data straddles).
+    base = min < 0 && max > 0 ? 0 : Math.min(min, 0)
+    top = Math.max(max, base)
+  } else {
+    // Lines fill the plot across the data's own range, so a high-baseline
+    // series ([800,850,900]) uses the full height instead of hugging the top.
+    base = min
+    top = max
+    if (base === top) { base -= 1; top += 1 } // flat series → centered
+  }
   const range = top - base || 1 // flat series → full-height-safe unit scale
   return {
     base,
@@ -108,7 +121,7 @@ function linePoints(d: ChartDatum[], width: number, height: number, pad: number)
   const values = d.map((x) => x.value)
   const plotW = width - pad * 2
   const plotH = height - pad * 2
-  const s = scaleOf(values, plotH)
+  const s = scaleOf(values, plotH, false) // lines fill the data range, not 0..max
   const n = d.length
   const step = n > 1 ? plotW / (n - 1) : 0
   return d.map((datum, i) => ({
@@ -125,14 +138,24 @@ function lineChart(d: ChartDatum[], o: Required<Omit<ChartSpec, 'type' | 'data'>
     // A single point has no line; draw a short flat stroke through it.
     ? `M ${u(pad)} ${u(pts[0].y)} L ${u(width - pad)} ${u(pts[0].y)}`
     : `M ${pts.map((p) => `${u(p.x)} ${u(p.y)}`).join(' L ')}`
-  const dots = !spark && o.labels
+  // Labelled line charts get an x-axis baseline, point markers, and value
+  // labels above each point so the series reads as a chart, not a bare path.
+  const decorate = !spark && o.labels
+  const axis = decorate
+    ? `<line data-cz-name="Axis" x1="${u(pad)}" y1="${u(height - pad)}" x2="${u(width - pad)}" y2="${u(height - pad)}" ` +
+      `stroke="#e5e7eb" stroke-width="1" />`
+    : ''
+  const dots = decorate
     ? pts.map((p, i) =>
-        `<circle data-cz-name="Point ${i + 1}" cx="${u(p.x)}" cy="${u(p.y)}" r="2.5" fill="${esc(color)}" />`,
+        `<circle data-cz-name="Point ${i + 1}" cx="${u(p.x)}" cy="${u(p.y)}" r="2.5" fill="${esc(color)}" />` +
+        `<text data-cz-name="Value ${i + 1}" x="${u(p.x)}" y="${u(Math.max(8, p.y - 6))}" ` +
+        `font-size="9" text-anchor="middle" fill="#6b7280">${esc(String(d[i].value))}</text>`,
       ).join('')
     : ''
   return (
     `<svg data-cz-name="${spark ? 'Sparkline' : 'Line chart'}" width="${u(width)}" height="${u(height)}" ` +
     `viewBox="0 0 ${u(width)} ${u(height)}" style="display:block">` +
+    axis +
     `<path data-cz-name="Line" d="${path}" fill="none" stroke="${esc(color)}" ` +
     `stroke-width="${spark ? 1.5 : 2}" stroke-linecap="round" stroke-linejoin="round" />` +
     dots +
@@ -159,7 +182,9 @@ function donutChart(d: ChartDatum[], o: Required<Omit<ChartSpec, 'type' | 'data'
   const slices = total === 0 ? '' : d.map((datum, i) => {
     const frac = Math.max(0, datum.value) / total
     const len = frac * circumference
-    const color = i === 0 && o.color !== DEFAULTS.color ? o.color : palette[i % palette.length]
+    // Explicit per-slice colors[] win; else the single color seeds slice 0 and
+    // the rest cycle the palette (so a hand-built legend can be matched).
+    const color = o.colors?.[i] ?? (i === 0 && o.color !== DEFAULTS.color ? o.color : palette[i % palette.length])
     const seg =
       `<circle data-cz-name="${esc(datum.label ?? `Slice ${i + 1}`)}" cx="${u(cx)}" cy="${u(cx)}" r="${u(r)}" ` +
       `fill="none" stroke="${esc(color)}" stroke-width="${u(stroke)}" ` +
@@ -187,6 +212,7 @@ export function buildChart(spec: ChartSpec): ChartResult {
     width: spec.width && spec.width > 0 ? spec.width : DEFAULTS.width,
     height: spec.height && spec.height > 0 ? spec.height : DEFAULTS.height,
     color: spec.color || DEFAULTS.color,
+    colors: spec.colors ?? [],
     trackColor: spec.trackColor || DEFAULTS.trackColor,
     labels: spec.labels ?? false,
   }

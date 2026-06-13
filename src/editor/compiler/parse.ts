@@ -79,6 +79,7 @@ export function parseStyleAttr(text: string): Array<[string, string]> {
 export function sanitizeStyle(
   text: string,
   dropped?: string[],
+  warnings?: string[],
 ): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [prop, rawValue] of parseStyleAttr(text)) {
@@ -93,19 +94,24 @@ export function sanitizeStyle(
       dropped?.push(`css:${prop}`)
       continue
     }
-    // Layout-model policy (position: fixed/sticky) — reject with a clear reason
-    // so it never silently applies.
-    if (cssValuePolicyReject(prop, rawValue)) {
-      dropped?.push(`css:${prop} (disallowed value)`)
+    // Layout-model policy (position: fixed/sticky) — reject with the specific,
+    // actionable reason ("use absolute") so it never silently flattens to static
+    // with no guidance.
+    const policy = cssValuePolicyReject(prop, rawValue)
+    if (policy) {
+      dropped?.push(`css:${prop} (${policy})`)
       continue
     }
     // One url() policy for every url-bearing declaration (shorthand and
-    // longhand alike): keep data:/asset://#frag/relative, strip external
-    // http(s) and anything unsafe, and report each removed reference.
-    const { value, dropped: urlDropped } = sanitizeCssUrls(rawValue)
+    // longhand alike): keep data:/asset://#frag/relative; keep external http(s)
+    // (placeholder imagery — same as <img src>) but warn; strip only unsafe.
+    const { value, dropped: urlDropped, external } = sanitizeCssUrls(rawValue)
     for (const cls of urlDropped) dropped?.push(`css:${prop} url(${cls})`)
-    // An empty value after stripping every url() means the declaration carried
-    // nothing but external refs — drop it rather than emit `prop: `.
+    for (const ref of external) {
+      warnings?.push(`css:${prop} kept external url (${ref}) — canvas now depends on the network; prefer import_asset`)
+    }
+    // An empty value after stripping unsafe url()s means the declaration carried
+    // nothing usable — drop it rather than emit `prop: `.
     if (value === '') {
       if (urlDropped.length === 0) dropped?.push(`css:${prop}`)
       continue
@@ -228,7 +234,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
       // SVG attribute names are case-sensitive (viewBox); HTML's lowercase.
       const name = isSvgEl ? attr.name : attr.name.toLowerCase()
       if (name === 'style') {
-        node.style = sanitizeStyle(attr.value, dropped)
+        node.style = sanitizeStyle(attr.value, dropped, warnings)
       } else if (name === 'class') {
         const classes = sanitizeClasses(attr.value)
         if (classes.length < attr.value.split(/\s+/).filter(Boolean).length) dropped.push('class:partial')
