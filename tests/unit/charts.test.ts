@@ -102,6 +102,24 @@ describe('buildChart — line / sparkline', () => {
     expect(path).not.toContain('NaN')
     expect(path).not.toContain('Infinity')
   })
+
+  it('fills the plot across the data range (high-baseline series, #29)', () => {
+    // [800,850,900] hugged the top under zero-anchored scaling; it should now
+    // span nearly the full plot height (min near the bottom, max near the top).
+    const height = 120
+    const pad = 8
+    const { markup } = buildChart({ type: 'line', data: [800, 850, 900], width: 100, height })
+    const path = /<path[^>]*\sd="([^"]+)"/.exec(markup)?.[1] ?? ''
+    const ys = [...path.matchAll(/[ML]\s[\d.]+\s([\d.]+)/g)].map((m) => parseFloat(m[1]))
+    const spread = Math.max(...ys) - Math.min(...ys)
+    expect(spread).toBeCloseTo(height - pad * 2, 0)
+  })
+
+  it('labelled line charts add an axis and per-point value labels (#29)', () => {
+    const { markup } = buildChart({ type: 'line', data: [10, 30, 20], labels: true })
+    expect(markup).toContain('data-cz-name="Axis"')
+    expect([...markup.matchAll(/data-cz-name="Value \d+"/g)]).toHaveLength(3)
+  })
 })
 
 describe('buildChart — donut', () => {
@@ -111,6 +129,12 @@ describe('buildChart — donut', () => {
     expect(dashes).toHaveLength(2)
     // 75 is three times 25 → its arc length is ~3x.
     expect(dashes[1] / dashes[0]).toBeCloseTo(3, 1)
+  })
+
+  it('honors per-slice colors[] so the ring matches a legend (#29)', () => {
+    const { markup } = buildChart({ type: 'donut', data: [1, 2, 3], colors: ['#111111', '#222222', '#333333'] })
+    const strokes = [...markup.matchAll(/data-cz-name="Slice \d+"[^>]*stroke="(#[0-9a-f]{6})"/g)].map((m) => m[1])
+    expect(strokes).toEqual(['#111111', '#222222', '#333333'])
   })
 
   it('arc lengths sum to the ring circumference', () => {

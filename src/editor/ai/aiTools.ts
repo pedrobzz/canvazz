@@ -1044,6 +1044,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       width: args.width as number | undefined,
       height: args.height as number | undefined,
       color: args.color as string | undefined,
+      colors: Array.isArray(args.colors) ? (args.colors as unknown[]).map(String) : undefined,
       trackColor: args.trackColor as string | undefined,
       labels: args.labels as boolean | undefined,
     })

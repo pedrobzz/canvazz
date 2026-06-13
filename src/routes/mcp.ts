@@ -540,6 +540,7 @@ server.registerTool('insert_chart', {
     width: z.number().positive().optional().describe('px, default 240'),
     height: z.number().positive().optional().describe('px, default 140'),
     color: z.string().optional().describe('Series/fill color (CSS color or var(--token))'),
+    colors: z.array(z.string()).optional().describe('Per-slice/series colors (CSS or var(--token)), index-aligned with data — e.g. match donut slices to a legend'),
     trackColor: z.string().optional().describe('Donut unfilled-track color'),
     labels: z.boolean().optional().describe('Show value/category labels where supported'),
     targetId: z.string().optional().describe('Container node id'),
