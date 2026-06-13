@@ -21,7 +21,7 @@ import { genId } from '../model/ids'
 import { createArtboard } from '../model/factory'
 import { editorStore } from '../store/editorStore'
 import type { EditorStore } from '../store/editorStore'
-import type { NodeId, NodeLocation, NodeModel, Op } from '../model/types'
+import type { FlowLink, NodeId, NodeLocation, NodeModel, Op } from '../model/types'
 
 /**
  * Browser-side executors for MCP tools. Every mutation goes through the
@@ -136,6 +136,9 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
         id: s.id, name: s.name, nodeId: s.nodeId, variantIds: s.variantIds, defaultVariantId: s.defaultVariantId,
       })),
       tokens: store.doc.tokens,
+      flows: (store.doc.flows ?? []).map((f) => ({
+        id: f.id, fromId: f.fromId, toId: f.toId, trigger: f.trigger, label: f.label,
+      })),
       selection: store.ui.selection,
       camera: cameraStore.camera,
       hints: [
@@ -677,6 +680,33 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     }
     store.setSelection(rootIds)
     return { ...mutationResult('insert_chart', rootIds), chart: name, dropped }
+  },
+
+  link_artboards(args) {
+    const fromId = String(args.fromId ?? '')
+    const toId = String(args.toId ?? '')
+    requireNode(fromId)
+    requireNode(toId)
+    if (fromId === toId) throw new Error('A flow link cannot connect a node to itself')
+    const trigger = args.trigger === 'hover' ? 'hover' : 'tap'
+    const label = args.label !== undefined ? String(args.label).slice(0, 120) : undefined
+    // Collapse duplicates: one from→to link, latest trigger/label wins.
+    const existing = (store.doc.flows ?? []).find((f) => f.fromId === fromId && f.toId === toId)
+    const flow: FlowLink = { id: existing?.id ?? genId('flow'), fromId, toId, trigger, ...(label ? { label } : {}) }
+    store.apply('AI: link artboards', [{ t: 'setFlow', flow }], 'ai')
+    return { ok: true, link: flow, undoable: true }
+  },
+
+  unlink_artboards(args) {
+    const flows = store.doc.flows ?? []
+    const linkId = args.linkId as string | undefined
+    let target = linkId ? flows.find((f) => f.id === linkId) : undefined
+    if (!target && args.fromId && args.toId) {
+      target = flows.find((f) => f.fromId === String(args.fromId) && f.toId === String(args.toId))
+    }
+    if (!target) throw new Error('No matching flow link (pass linkId, or fromId + toId)')
+    store.apply('AI: unlink artboards', [{ t: 'removeFlow', id: target.id }], 'ai')
+    return { ok: true, removed: target.id, undoable: true }
   },
 }
 

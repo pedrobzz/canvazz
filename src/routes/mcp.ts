@@ -465,6 +465,33 @@ server.registerTool('insert_chart', {
   },
 }, forward('insert_chart'))
 
+// --- Flows (#19) ------------------------------------------------------------
+
+server.registerTool('link_artboards', {
+  title: 'Link two artboards (prototype flow)',
+  description:
+    'Record a prototype flow link "from this node, on tap/hover, go to that artboard". Persisted, undoable, and surfaced in get_basic_info under flows; removed automatically when either endpoint is deleted. Re-linking the same from→to updates the existing link.',
+  inputSchema: {
+    project,
+    fromId: z.string().describe('Source node id (a card, button, or artboard)'),
+    toId: z.string().describe('Destination node id (usually an artboard)'),
+    trigger: z.enum(['tap', 'hover']).optional().describe('Default tap'),
+    label: z.string().max(120).optional().describe('Optional human label for the flow'),
+  },
+}, forward('link_artboards'))
+
+server.registerTool('unlink_artboards', {
+  title: 'Remove a prototype flow link',
+  description:
+    'Delete a flow link by its id (linkId, from get_basic_info → flows) or by the fromId + toId pair.',
+  inputSchema: {
+    project,
+    linkId: z.string().optional().describe('Flow link id'),
+    fromId: z.string().optional().describe('Source node id (with toId)'),
+    toId: z.string().optional().describe('Destination node id (with fromId)'),
+  },
+}, forward('unlink_artboards'))
+
 export const Route = createFileRoute('/mcp')({
   server: {
     handlers: {
