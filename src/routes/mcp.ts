@@ -387,24 +387,26 @@ server.registerTool('detach_instance', {
 server.registerTool('delete_component', {
   title: 'Delete a component or variant',
   description:
-    'Remove a component definition and its Design System subtree. Refuses while instances depend on it; instances switched to a deleted variant fall back to the base.',
+    'Remove a component definition and its Design System subtree. Refuses while live instances depend on it, listing the blocking instance ids first (detach or delete those, then retry); otherwise a base-of-a-set requires removing its other variants first. Instances switched to a deleted variant fall back to the base.',
   inputSchema: { project, componentId: z.string().min(1) },
 }, forward('delete_component'))
 
 server.registerTool('set_instance_overrides', {
   title: 'Override a component instance',
   description:
-    'Per-instance overrides keyed by definition-node id: text, style, classes, visible, attrs, or nested swap (componentId/variantId). Also switches the instance variant via variantId at the top level.',
+    'Per-instance overrides keyed by definition-node id: text, style (var(--token) values welcome — live-updating), classes, visible, attrs, per-instance icon swap (icon: "sf.symbol.name" on an icon node, so 4 instances of one card can show 4 different SF Symbols), or nested swap (componentId/variantId). Also switches the instance variant via variantId at the top level.',
   inputSchema: {
     project,
     instanceId: z.string(),
     variantId: z.string().optional().describe('Switch the instance to this variant'),
     overrides: z.record(z.string(), z.object({
       text: z.string().optional(),
-      style: z.record(z.string(), z.string()).optional(),
+      style: z.record(z.string(), z.string()).optional().describe('var(--token) values supported, sanitized like update_styles'),
       classes: z.array(z.string()).optional(),
       visible: z.boolean().optional(),
       attrs: z.record(z.string(), z.string()).optional(),
+      icon: z.string().optional().describe('SF Symbol name to render on this instance only (target node must be an icon)'),
+      variant: z.enum(['monochrome', 'dualtone']).optional().describe('Icon variant for the icon swap'),
       componentId: z.string().optional(),
       variantId: z.string().optional(),
     })).optional(),

@@ -10,7 +10,7 @@ import {
 } from '../commands'
 import {
   createInstance, createMainComponent, createVariant, deleteComponent,
-  detachInstance, setInstanceOverride, setInstanceVariant,
+  detachInstance, setInstanceIconOverride, setInstanceOverride, setInstanceVariant,
 } from '../components/componentCommands'
 import { sfSymbolMarkup } from '@/components/SFSymbol'
 import { ensureIconRegistries } from '../iconResolver'
@@ -476,7 +476,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     return { ok: true, deleted: componentId, undoable: true }
   },
 
-  set_instance_overrides(args) {
+  async set_instance_overrides(args) {
     const instanceId = args.instanceId as string
     const instance = requireNode(instanceId)
     if (!instance.componentId) throw new Error(`${instanceId} is not a component instance`)
@@ -486,7 +486,25 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       }
     }
     const overrides = (args.overrides as Record<string, Json> | undefined) ?? {}
+    // Per-instance icon swaps regenerate the glyph from the registry during
+    // expansion (which is synchronous), so warm it once before applying any.
+    if (Object.values(overrides).some((o) => o.icon !== undefined)) {
+      await ensureIconRegistries()
+    }
     for (const [sourceId, o] of Object.entries(overrides)) {
+      if (o.icon !== undefined) {
+        const symbol = String(o.icon).trim()
+        if (!symbol) throw new Error(`Empty icon for ${sourceId}`)
+        const variant = o.variant !== undefined ? String(o.variant) : undefined
+        // Validate the symbol exists before storing the override.
+        const probe = await sfSymbolMarkup(symbol, { variant: variant === 'dualtone' ? 'dualtone' : 'monochrome' })
+        if (!probe) {
+          throw new Error(`Unknown SF Symbol: "${symbol}". Use Apple names like "heart.fill", "star", "bolt.fill".`)
+        }
+        const res = setInstanceIconOverride({ ...AI }, instanceId, sourceId, symbol, variant)
+        if (!res.ok) throw new Error(res.reason)
+        continue
+      }
       const ok = setInstanceOverride({ ...AI }, instanceId, sourceId, {
         text: o.text !== undefined ? String(o.text) : undefined,
         style: o.style as Record<string, string> | undefined,
