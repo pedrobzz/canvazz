@@ -230,6 +230,94 @@ body {
   color: var(--cz-accent);
 }
 
+/* --- Comments ----------------------------------------------------------- */
+.cz-comment-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 15;
+}
+/* World-anchored pins & cards translate themselves; everything else is hidden
+   until placed. */
+.cz-comment-anchor {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+.cz-comment-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: -28px 0 0 0; /* anchor the tail tip at the world point */
+  color: #fff;
+  background: var(--cz-accent);
+  border: 1.5px solid rgba(255, 255, 255, 0.9);
+  border-radius: 14px 14px 14px 3px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.cz-comment-pin:hover {
+  transform: scale(1.08);
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.5);
+}
+.cz-comment-pin--active {
+  background: var(--cz-accent);
+  outline: 2px solid var(--cz-accent-soft);
+  outline-offset: 1px;
+}
+.cz-comment-pin--resolved {
+  background: #30d158;
+  opacity: 0.85;
+}
+.cz-comment-pin__count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
+  color: var(--cz-accent);
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.cz-comment-area {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 1.5px dashed var(--cz-accent);
+  background: var(--cz-accent-soft);
+  opacity: 0.35;
+  border-radius: 4px;
+  pointer-events: none;
+}
+/* Apple-style vibrant surface for popover + thread card + composer. */
+.cz-comment-surface {
+  pointer-events: auto;
+  background: color-mix(in srgb, var(--cz-panel) 86%, transparent);
+  backdrop-filter: saturate(180%) blur(20px);
+  color: var(--cz-panel-fg);
+  border: 1px solid var(--cz-panel-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.cz-comment-msg {
+  background: var(--cz-panel-hover);
+  border-radius: 10px;
+  padding: 7px 9px;
+}
+.cz-comment-msg--agent {
+  background: color-mix(in srgb, var(--cz-ai) 18%, var(--cz-panel-hover));
+}
+
 /* --- Editor panels ------------------------------------------------------ */
 .cz-panel {
   background: var(--cz-panel);
