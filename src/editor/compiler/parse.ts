@@ -117,6 +117,24 @@ export function sanitizeStyle(
 
 const ID_RE = /^[\w-]{1,64}$/
 
+/**
+ * SVG presentation attributes that are also CSS properties. When such an
+ * attribute carries a `var(--token)`, CSS custom properties do NOT resolve in
+ * the *attribute* form (they paint nothing), but they resolve naturally when
+ * moved into inline `style`. We relocate only var()-bearing values here; plain
+ * literals (`stroke="#f00"`) stay as attributes so the model is unchanged.
+ */
+const SVG_PRESENTATION_CSS_ATTRS = new Set([
+  'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
+  'stroke-dasharray', 'stroke-dashoffset', 'fill-opacity', 'stroke-opacity',
+  'fill-rule', 'clip-rule', 'opacity', 'stop-color', 'stop-opacity',
+  'color', 'paint-order', 'vector-effect',
+  'font-size', 'font-family', 'font-weight', 'letter-spacing',
+  'text-anchor', 'dominant-baseline',
+])
+
+const VAR_RE = /var\s*\(/i
+
 const TAG_NAMES: Record<string, string> = {
   svg: 'Vector', path: 'Path', circle: 'Circle', rect: 'Rect', line: 'Line',
   ellipse: 'Ellipse', polygon: 'Polygon', polyline: 'Polyline', g: 'Group',
@@ -196,6 +214,11 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     }
     if (!isSvgEl && !ALLOWED_TAGS.has(tag)) dropped.push(`tag:${tag}->div`)
 
+    // SVG presentation attrs carrying var() are relocated to inline style so
+    // tokens resolve; collected here and merged after the loop (inline style,
+    // if also present, wins).
+    const relocatedStyle: Record<string, string> = {}
+
     for (const attr of Array.from(el.attributes)) {
       // SVG attribute names are case-sensitive (viewBox); HTML's lowercase.
       const name = isSvgEl ? attr.name : attr.name.toLowerCase()
@@ -216,7 +239,15 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
         dropped.push(`attr:${name}`)
       } else if (isSvgEl) {
         if (SVG_ATTRS.has(name) && isSafeAttrValue(attr.value)) {
-          node.attrs[name] = attr.value.slice(0, 4000)
+          // var() does not resolve in SVG presentation *attributes* (paints
+          // nothing). Relocate token-bearing presentation values to inline
+          // style, where custom properties resolve and live-update. Literals
+          // stay as attributes so the model is otherwise untouched.
+          if (SVG_PRESENTATION_CSS_ATTRS.has(name) && VAR_RE.test(attr.value)) {
+            relocatedStyle[name] = attr.value.slice(0, 4000)
+          } else {
+            node.attrs[name] = attr.value.slice(0, 4000)
+          }
         } else if (!name.startsWith('data-')) {
           dropped.push(`attr:${name}`)
         }
@@ -239,6 +270,12 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
       } else if (!name.startsWith('data-')) {
         dropped.push(`attr:${name}`)
       }
+    }
+
+    // Fold relocated var() presentation values into inline style. An explicit
+    // inline `style` declaration for the same property wins (author intent).
+    if (Object.keys(relocatedStyle).length > 0) {
+      node.style = { ...relocatedStyle, ...node.style }
     }
 
     nodes.push(node)
