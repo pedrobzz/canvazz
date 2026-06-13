@@ -26,7 +26,9 @@ import { resolveNode } from '../model/instances'
 import type { ResolvedNode } from '../model/instances'
 import { editorStore } from '../store/editorStore'
 import type { EditorStore } from '../store/editorStore'
-import type { DocumentModel, FlowLink, NodeId, NodeLocation, NodeModel, Op } from '../model/types'
+import type {
+  CommentThread, DocumentModel, FlowLink, NodeId, NodeLocation, NodeModel, Op,
+} from '../model/types'
 
 /**
  * Browser-side executors for MCP tools. Every mutation goes through the
@@ -70,6 +72,47 @@ function summarize(id: NodeId): Json | null {
 }
 
 const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s)
+
+/**
+ * Compact view of a comment thread for the agent: the anchor, the nodes it is
+ * attached to (live summaries — deleted nodes drop out), and either the latest
+ * message (list view) or the whole conversation (`full`). Lets the model read
+ * what a comment is talking about before deciding to act or reply.
+ */
+function commentSummary(thread: CommentThread, full = false): Json {
+  const last = thread.messages[thread.messages.length - 1]
+  return {
+    id: thread.id,
+    resolved: thread.resolved,
+    pageId: thread.pageId,
+    kind: thread.area ? 'area' : 'node',
+    anchor: { x: Math.round(thread.x), y: Math.round(thread.y) },
+    ...(thread.area
+      ? { area: {
+          x: Math.round(thread.area.x), y: Math.round(thread.area.y),
+          width: Math.round(thread.area.width), height: Math.round(thread.area.height),
+        } }
+      : {}),
+    attachedNodeIds: thread.nodeIds,
+    attachedNodes: thread.nodeIds.map(summarize).filter(Boolean),
+    messageCount: thread.messages.length,
+    createdAt: thread.createdAt,
+    ...(full
+      ? { messages: thread.messages }
+      : { lastMessage: last
+          ? { author: last.author, body: truncate(last.body, 240), createdAt: last.createdAt }
+          : null }),
+  }
+}
+
+/** Resolve a comment thread by id under any of the accepted arg aliases. */
+function requireThread(args: Json): CommentThread {
+  const id = (args.commentId ?? args.id ?? args.threadId) as string | undefined
+  if (!id) throw new Error('Provide commentId. Use list_comments to see open threads.')
+  const thread = store.getCommentThread(id)
+  if (!thread) throw new Error(`Unknown comment id: ${id}. Use list_comments to see open threads.`)
+  return thread
+}
 
 /**
  * Overridable slots of an instance: every internal node (not the root) with the
@@ -1177,6 +1220,57 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       ...createdNodesFrom(nodes),
       dropped,
       ...(warnings?.length ? { warnings } : {}),
+    }
+  },
+
+  // --- Comments ------------------------------------------------------------
+
+  list_comments(args) {
+    const includeResolved = args.includeResolved === true
+    const pageId = args.page !== undefined ? resolvePage(String(args.page)).id : undefined
+    const threads = (store.doc.comments ?? []).filter(
+      (t) => (includeResolved || !t.resolved) && (pageId === undefined || t.pageId === pageId),
+    )
+    return {
+      count: threads.length,
+      comments: threads.map((t) => commentSummary(t)),
+      hint: threads.length === 0
+        ? 'No matching threads. By default only unresolved comments are returned; pass includeResolved:true for the rest.'
+        : 'Use get_comment for the full conversation, then reply_comment to answer (auto-resolves by default).',
+    }
+  },
+
+  get_comment(args) {
+    const thread = requireThread(args)
+    return {
+      ...commentSummary(thread, true),
+      // Indented tree of each attached subtree so the agent sees the structure
+      // the comment is about, not just the node names.
+      attachedTree: thread.nodeIds
+        .filter((id) => store.doc.nodes[id])
+        .flatMap((id) => treeSummary(id, 0, 3))
+        .join('\n') || undefined,
+    }
+  },
+
+  reply_comment(args) {
+    const thread = requireThread(args)
+    const body = String(args.body ?? '').trim()
+    if (!body) throw new Error('body is required (the reply text).')
+    // Auto-resolve by default: the agent answered and is closing the loop. Pass
+    // resolve:false to reply without resolving (asking a question, explaining a
+    // blocker) — that reopens a resolved thread so the conversation continues.
+    const resolve = args.resolve !== false
+    store.addCommentMessage(thread.id, body, 'agent', { reopen: !resolve })
+    if (resolve) store.setCommentResolved(thread.id, true)
+    const updated = store.getCommentThread(thread.id)!
+    return {
+      ok: true,
+      resolved: updated.resolved,
+      comment: commentSummary(updated, true),
+      hint: resolve
+        ? 'Replied and resolved. The user can reopen by replying or delete the thread.'
+        : 'Replied without resolving — the thread is open for the user to respond.',
     }
   },
 }

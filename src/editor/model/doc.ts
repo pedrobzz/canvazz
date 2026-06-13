@@ -345,5 +345,6 @@ export function emptyDocument(id: string, name: string): DocumentModel {
     fonts: {},
     assets: {},
     flows: [],
+    comments: [],
   }
 }

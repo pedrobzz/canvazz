@@ -1,7 +1,10 @@
 import { applyOps, emptyDocument } from '../model/doc'
 import { migrateDocument } from '../model/migrate'
 import { genId } from '../model/ids'
-import type { DocumentModel, NodeId, Op, Transaction, TransactionSource } from '../model/types'
+import type {
+  CommentAuthor, CommentMessage, CommentRect, CommentThread,
+  DocumentModel, NodeId, Op, Transaction, TransactionSource,
+} from '../model/types'
 
 export type Tool =
   | 'select'
@@ -13,8 +16,17 @@ export type Tool =
   | 'line'
   | 'polygon'
   | 'star'
+  | 'comment'
   | 'component'
   | 'ai'
+
+/** A comment being placed but not yet submitted — the open composer's anchor. */
+export interface CommentDraft {
+  x: number
+  y: number
+  nodeIds: NodeId[]
+  area?: CommentRect
+}
 
 export interface UiState {
   tool: Tool
@@ -25,6 +37,10 @@ export interface UiState {
   snapping: boolean
   /** Node ids touched by the most recent AI transaction, for indicators. */
   aiChanged: NodeId[]
+  /** Thread whose card is open on the canvas, if any. */
+  activeCommentId: string | null
+  /** A comment being composed (composer open at this anchor), if any. */
+  commentDraft: CommentDraft | null
 }
 
 interface HistoryEntry {
@@ -61,6 +77,8 @@ export class EditorStore {
     showGrid: false,
     snapping: true,
     aiChanged: [],
+    activeCommentId: null,
+    commentDraft: null,
   }
   /** Bumped on every doc change; doc-wide subscribers key off this. */
   docVersion = 0
@@ -195,10 +213,14 @@ export class EditorStore {
       fonts: doc.fonts ?? {},
       assets: doc.assets ?? {},
       componentSets: doc.componentSets ?? {},
+      comments: doc.comments ?? [],
     })
     this.undoStack = []
     this.redoStack = []
-    this.setUi({ selection: [], hoverId: null, editingTextId: null, aiChanged: [] })
+    this.setUi({
+      selection: [], hoverId: null, editingTextId: null, aiChanged: [],
+      activeCommentId: null, commentDraft: null,
+    })
     this.docVersion++
     for (const fn of this.docListeners) fn()
     for (const set of this.nodeListeners.values()) for (const fn of set) fn()
@@ -248,9 +270,112 @@ export class EditorStore {
   setActivePage(id: string) {
     if (this.doc.activePageId === id || !this.doc.pages.some((p) => p.id === id)) return
     this.doc = { ...this.doc, activePageId: id }
-    this.setUi({ selection: [], hoverId: null, editingTextId: null, aiChanged: [] })
+    this.setUi({
+      selection: [], hoverId: null, editingTextId: null, aiChanged: [],
+      activeCommentId: null, commentDraft: null,
+    })
     this.docVersion++
     for (const fn of this.docListeners) fn()
+  }
+
+  // --- Comments ------------------------------------------------------------
+  // Comment threads are a side channel: a conversation log, not a design edit.
+  // They persist on the document (so autosave/reload carry them) but bypass the
+  // undo/redo op system — replying or resolving must not be Ctrl+Z-able, and an
+  // agent's MCP reply must never land on the user's undo stack. Each mutation
+  // replaces doc.comments, bumps docVersion, and notifies doc subscribers (the
+  // canvas pins, the comments panel, and autosave).
+
+  private comments(): CommentThread[] {
+    return this.doc.comments ?? []
+  }
+
+  private commitComments(comments: CommentThread[]) {
+    this.doc = { ...this.doc, comments }
+    this.docVersion++
+    for (const fn of this.docListeners) fn()
+  }
+
+  /** Create a thread anchored at (x,y) on a page with one opening message. */
+  addCommentThread(input: {
+    x: number
+    y: number
+    nodeIds?: NodeId[]
+    area?: CommentRect
+    pageId?: string
+    author?: CommentAuthor
+    body: string
+  }): CommentThread {
+    const now = Date.now()
+    const thread: CommentThread = {
+      id: genId('cmt'),
+      pageId: input.pageId ?? this.doc.activePageId,
+      x: input.x,
+      y: input.y,
+      nodeIds: input.nodeIds ?? [],
+      ...(input.area ? { area: input.area } : {}),
+      messages: [{ id: genId('msg'), author: input.author ?? 'user', body: input.body, createdAt: now }],
+      resolved: false,
+      createdAt: now,
+    }
+    this.commitComments([...this.comments(), thread])
+    return thread
+  }
+
+  getCommentThread(id: string): CommentThread | null {
+    return this.comments().find((t) => t.id === id) ?? null
+  }
+
+  /** Append a reply. `reopen` (default true) clears resolved on a new message. */
+  addCommentMessage(
+    threadId: string,
+    body: string,
+    author: CommentAuthor = 'user',
+    opts?: { reopen?: boolean },
+  ): CommentMessage | null {
+    const thread = this.getCommentThread(threadId)
+    if (!thread) return null
+    const message: CommentMessage = { id: genId('msg'), author, body, createdAt: Date.now() }
+    const reopen = opts?.reopen ?? true
+    const next = this.comments().map((t) =>
+      t.id === threadId
+        ? { ...t, messages: [...t.messages, message], resolved: reopen ? false : t.resolved }
+        : t,
+    )
+    this.commitComments(next)
+    return message
+  }
+
+  /** Edit a message's body in place (author check is the caller's concern). */
+  editCommentMessage(threadId: string, messageId: string, body: string): boolean {
+    const thread = this.getCommentThread(threadId)
+    if (!thread || !thread.messages.some((m) => m.id === messageId)) return false
+    const next = this.comments().map((t) =>
+      t.id === threadId
+        ? {
+            ...t,
+            messages: t.messages.map((m) =>
+              m.id === messageId ? { ...m, body, editedAt: Date.now() } : m,
+            ),
+          }
+        : t,
+    )
+    this.commitComments(next)
+    return true
+  }
+
+  setCommentResolved(threadId: string, resolved: boolean): boolean {
+    const thread = this.getCommentThread(threadId)
+    if (!thread || thread.resolved === resolved) return false
+    this.commitComments(this.comments().map((t) => (t.id === threadId ? { ...t, resolved } : t)))
+    return true
+  }
+
+  deleteCommentThread(threadId: string): boolean {
+    if (!this.getCommentThread(threadId)) return false
+    this.commitComments(this.comments().filter((t) => t.id !== threadId))
+    if (this.ui.activeCommentId === threadId) this.setUi({ activeCommentId: null })
+    return true
   }
 
   // --- Queries -------------------------------------------------------------

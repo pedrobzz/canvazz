@@ -9,6 +9,11 @@ export default defineConfig({
   // snapshots depend on exclusive camera state — run serially.
   workers: 1,
   fullyParallel: false,
+  // Shared CI runners vary wildly under load (the 10k-node perf smoke has been
+  // seen at 432ms and 754ms for the same mount), which flakes timing-sensitive
+  // tests near their thresholds. Retry on CI so a momentary spike doesn't fail
+  // the run; a genuinely broken test still fails all attempts.
+  retries: process.env.CI ? 2 : 0,
   expect: {
     toHaveScreenshot: { maxDiffPixelRatio: 0.02 },
   },

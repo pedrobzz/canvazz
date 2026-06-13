@@ -1,5 +1,7 @@
 import { useState, useSyncExternalStore } from 'react'
-import { Check, Component, File, Layers, Plus, ScrollText, Sparkles, User } from 'lucide-react'
+import {
+  Check, Component, File, Layers, MessageCircle, Plus, ScrollText, Sparkles, Trash2, User,
+} from 'lucide-react'
 import {
   ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger,
 } from '@/components/ui/context-menu'
@@ -12,30 +14,35 @@ import { DEFAULT_WEIGHTS, isValidFamily, verifyFontLoaded } from '../fonts'
 import { insertHtml } from '../commands'
 import { genId } from '../model/ids'
 import { editorStore } from '../store/editorStore'
-import { useDocVersion } from '../store/hooks'
+import { useDocVersion, useUi } from '../store/hooks'
+import { timeAgo } from '../canvas/CommentLayer'
 import { LayerTree } from './LayerTree'
+import type { CommentThread } from '../model/types'
 
 export function LeftPanel() {
   return (
     <div
       data-cz-ui
-      className="cz-panel flex h-full w-60 shrink-0 flex-col border-r border-[var(--cz-panel-border)]"
+      className="cz-panel flex h-full w-60 shrink-0 flex-col border-r border-(--cz-panel-border)"
     >
       <Tabs defaultValue="layers" className="flex h-full min-h-0 flex-col gap-0">
-        <TabsList className="m-2 grid w-auto grid-cols-3 bg-[var(--cz-panel-hover)]">
-          <TabsTrigger value="layers" className="text-[11px] data-[state=active]:bg-[var(--cz-panel-active)] data-[state=active]:text-white">
-            <Layers className="size-3" /> Layers
+        <TabsList className="m-2 grid w-auto grid-cols-4 gap-0.5 bg-(--cz-panel-hover)">
+          <TabsTrigger value="layers" className="gap-1 px-1 text-[10px] data-[state=active]:bg-(--cz-panel-active) data-[state=active]:text-white">
+            <Layers className="size-3 shrink-0" /> Layers
           </TabsTrigger>
-          <TabsTrigger value="components" className="text-[11px] data-[state=active]:bg-[var(--cz-panel-active)] data-[state=active]:text-white">
-            <Component className="size-3" /> Assets
+          <TabsTrigger value="components" className="gap-1 px-1 text-[10px] data-[state=active]:bg-(--cz-panel-active) data-[state=active]:text-white">
+            <Component className="size-3 shrink-0" /> Assets
           </TabsTrigger>
-          <TabsTrigger value="log" className="text-[11px] data-[state=active]:bg-[var(--cz-panel-active)] data-[state=active]:text-white">
-            <ScrollText className="size-3" /> Log
+          <TabsTrigger value="comments" className="gap-1 px-1 text-[10px] data-[state=active]:bg-(--cz-panel-active) data-[state=active]:text-white">
+            <MessageCircle className="size-3 shrink-0" /> Notes
+          </TabsTrigger>
+          <TabsTrigger value="log" className="gap-1 px-1 text-[10px] data-[state=active]:bg-(--cz-panel-active) data-[state=active]:text-white">
+            <ScrollText className="size-3 shrink-0" /> Log
           </TabsTrigger>
         </TabsList>
         <TabsContent value="layers" className="flex min-h-0 flex-1 flex-col">
           <PagesSection />
-          <div className="px-3 pb-1 pt-2 text-[11px] font-semibold text-[var(--cz-panel-fg)]">
+          <div className="px-3 pb-1 pt-2 text-[11px] font-semibold text-(--cz-panel-fg)">
             Layers
           </div>
           <LayerTree />
@@ -45,6 +52,9 @@ export function LeftPanel() {
           <FontsSection />
           <IconsSection />
           <ComponentList />
+        </TabsContent>
+        <TabsContent value="comments" className="min-h-0 flex-1 overflow-y-auto">
+          <CommentsPanel />
         </TabsContent>
         <TabsContent value="log" className="min-h-0 flex-1 overflow-y-auto">
           <CommandLog />
@@ -61,12 +71,12 @@ function PagesSection() {
   const [renaming, setRenaming] = useState<string | null>(null)
 
   return (
-    <div className="border-b border-[var(--cz-panel-border)] pb-1" data-testid="pages">
+    <div className="border-b border-(--cz-panel-border) pb-1" data-testid="pages">
       <div className="flex items-center justify-between px-3 py-1.5">
-        <span className="text-[11px] font-semibold text-[var(--cz-panel-fg)]">Pages</span>
+        <span className="text-[11px] font-semibold text-(--cz-panel-fg)">Pages</span>
         <button
           aria-label="Add page"
-          className="rounded p-0.5 text-[var(--cz-panel-muted)] hover:bg-[var(--cz-panel-hover)] hover:text-white"
+          className="rounded p-0.5 text-(--cz-panel-muted) hover:bg-(--cz-panel-hover) hover:text-white"
           onClick={() => {
             const page = { id: genId('page'), name: `Page ${doc.pages.length + 1}`, children: [] }
             editorStore.apply('Add page', [{ t: 'addPage', page, index: doc.pages.length }])
@@ -88,8 +98,8 @@ function PagesSection() {
                     tabIndex={0}
                     className={`mx-1 flex cursor-default items-center gap-2 rounded-md px-2 py-1 text-[11.5px] ${
                       active
-                        ? 'bg-[var(--cz-accent)]/20 text-white'
-                        : 'text-[var(--cz-panel-fg)] hover:bg-[var(--cz-panel-hover)]'
+                        ? 'bg-(--cz-accent)/20 text-white'
+                        : 'text-(--cz-panel-fg) hover:bg-(--cz-panel-hover)'
                     }`}
                     onClick={() => editorStore.setActivePage(page.id)}
                     onDoubleClick={() => setRenaming(page.id)}
@@ -97,7 +107,7 @@ function PagesSection() {
                       if (e.key === 'Enter') editorStore.setActivePage(page.id)
                     }}
                   >
-                    <File className="size-3 shrink-0 text-[var(--cz-panel-muted)]" />
+                    <File className="size-3 shrink-0 text-(--cz-panel-muted)" />
                     {renaming === page.id ? (
                       <input
                         autoFocus
@@ -120,7 +130,7 @@ function PagesSection() {
                     ) : (
                       <span className="truncate">{page.name}</span>
                     )}
-                    {active ? <Check className="ml-auto size-3 shrink-0 text-[var(--cz-accent)]" /> : null}
+                    {active ? <Check className="ml-auto size-3 shrink-0 text-(--cz-accent)" /> : null}
                   </div>
                 </ContextMenuTrigger>
                 <ContextMenuContent>
@@ -163,12 +173,12 @@ function ColorsSection() {
   const [renaming, setRenaming] = useState<string | null>(null)
 
   return (
-    <div className="border-b border-[var(--cz-panel-border)] pb-2" data-testid="colors">
+    <div className="border-b border-(--cz-panel-border) pb-2" data-testid="colors">
       <div className="flex items-center justify-between px-3 py-1.5">
-        <span className="text-[11px] font-semibold text-[var(--cz-panel-fg)]">Colors</span>
+        <span className="text-[11px] font-semibold text-(--cz-panel-fg)">Colors</span>
         <button
           aria-label="Add color"
-          className="rounded p-0.5 text-[var(--cz-panel-muted)] hover:bg-[var(--cz-panel-hover)] hover:text-white"
+          className="rounded p-0.5 text-(--cz-panel-muted) hover:bg-(--cz-panel-hover) hover:text-white"
           onClick={() => {
             let n = Object.keys(tokens).length + 1
             while (tokens[`color-${n}`]) n++
@@ -181,13 +191,13 @@ function ColorsSection() {
         </button>
       </div>
       {Object.keys(tokens).length === 0 ? (
-        <div className="px-3 text-[10px] text-[var(--cz-panel-muted)]">
+        <div className="px-3 text-[10px] text-(--cz-panel-muted)">
           Define colors once, reuse everywhere via the ◇ picker in color fields.
         </div>
       ) : (
         <ul className="flex flex-col gap-0.5 px-2">
           {Object.entries(tokens).map(([name, value]) => (
-            <li key={name} className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-[var(--cz-panel-hover)]">
+            <li key={name} className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-(--cz-panel-hover)">
               <input
                 type="color"
                 aria-label={`${name} color`}
@@ -227,10 +237,10 @@ function ColorsSection() {
                   {name}
                 </span>
               )}
-              <span className="shrink-0 font-mono text-[9px] text-[var(--cz-panel-muted)]">{value}</span>
+              <span className="shrink-0 font-mono text-[9px] text-(--cz-panel-muted)">{value}</span>
               <button
                 aria-label={`Delete ${name}`}
-                className="shrink-0 text-[10px] text-[var(--cz-panel-muted)] opacity-0 hover:text-white group-hover:opacity-100"
+                className="shrink-0 text-[10px] text-(--cz-panel-muted) opacity-0 hover:text-white group-hover:opacity-100"
                 onClick={() =>
                   editorStore.apply('Delete color token', [{ t: 'setToken', name, value: null }])
                 }
@@ -268,8 +278,8 @@ function FontsSection() {
   }
 
   return (
-    <div className="border-b border-[var(--cz-panel-border)] pb-2" data-testid="fonts">
-      <div className="px-3 py-1.5 text-[11px] font-semibold text-[var(--cz-panel-fg)]">Fonts</div>
+    <div className="border-b border-(--cz-panel-border) pb-2" data-testid="fonts">
+      <div className="px-3 py-1.5 text-[11px] font-semibold text-(--cz-panel-fg)">Fonts</div>
       <div className="flex items-center gap-1.5 px-3 pb-1.5">
         <input
           value={draft}
@@ -282,14 +292,14 @@ function FontsSection() {
         />
         <button
           aria-label="Add font"
-          className="rounded p-0.5 text-[var(--cz-panel-muted)] hover:bg-[var(--cz-panel-hover)] hover:text-white"
+          className="rounded p-0.5 text-(--cz-panel-muted) hover:bg-(--cz-panel-hover) hover:text-white"
           onClick={() => void addFont()}
         >
           <Plus className="size-3.5" />
         </button>
       </div>
       {Object.keys(fonts).length === 0 ? (
-        <div className="px-3 text-[10px] text-[var(--cz-panel-muted)]">
+        <div className="px-3 text-[10px] text-(--cz-panel-muted)">
           e.g. Inter, Space Grotesk, Fraunces — loaded fonts appear in Typography.
         </div>
       ) : (
@@ -297,7 +307,7 @@ function FontsSection() {
           {Object.values(fonts).map((font) => (
             <li
               key={font.family}
-              className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-[var(--cz-panel-hover)]"
+              className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-(--cz-panel-hover)"
             >
               <span
                 className="flex-1 truncate text-[13px]"
@@ -311,13 +321,13 @@ function FontsSection() {
                   not found
                 </span>
               ) : (
-                <span className="shrink-0 font-mono text-[9px] text-[var(--cz-panel-muted)]">
+                <span className="shrink-0 font-mono text-[9px] text-(--cz-panel-muted)">
                   {font.weights.length}w
                 </span>
               )}
               <button
                 aria-label={`Delete ${font.family}`}
-                className="shrink-0 text-[10px] text-[var(--cz-panel-muted)] opacity-0 hover:text-white group-hover:opacity-100"
+                className="shrink-0 text-[10px] text-(--cz-panel-muted) opacity-0 hover:text-white group-hover:opacity-100"
                 onClick={() =>
                   editorStore.apply('Remove font', [{ t: 'setFont', family: font.family, font: null }])
                 }
@@ -374,8 +384,8 @@ function IconsSection() {
   }
 
   return (
-    <div className="border-b border-[var(--cz-panel-border)] pb-2" data-testid="icons">
-      <div className="px-3 py-1.5 text-[11px] font-semibold text-[var(--cz-panel-fg)]">Icons</div>
+    <div className="border-b border-(--cz-panel-border) pb-2" data-testid="icons">
+      <div className="px-3 py-1.5 text-[11px] font-semibold text-(--cz-panel-fg)">Icons</div>
       <div className="flex items-center gap-1.5 px-3">
         <input
           value={name}
@@ -387,7 +397,7 @@ function IconsSection() {
           }}
         />
         <span
-          className="flex size-7 shrink-0 items-center justify-center rounded bg-[var(--cz-panel-hover)] text-[var(--cz-panel-fg)]"
+          className="flex size-7 shrink-0 items-center justify-center rounded bg-(--cz-panel-hover) text-(--cz-panel-fg)"
           title="Preview"
         >
           <SFSymbol name={name.trim() || 'questionmark'} variant={variant} size={16} />
@@ -403,7 +413,7 @@ function IconsSection() {
           <option value="dualtone">Dualtone</option>
         </select>
         <button
-          className="shrink-0 rounded bg-[var(--cz-panel-hover)] px-2 py-1 text-[11px] hover:bg-[var(--cz-panel-active)] hover:text-white"
+          className="shrink-0 rounded bg-(--cz-panel-hover) px-2 py-1 text-[11px] hover:bg-(--cz-panel-active) hover:text-white"
           onClick={() => void insert()}
         >
           Insert
@@ -418,7 +428,7 @@ function ComponentList() {
   const components = Object.values(editorStore.doc.components)
   if (components.length === 0) {
     return (
-      <div className="px-3 py-2 text-[11px] text-[var(--cz-panel-muted)]">
+      <div className="px-3 py-2 text-[11px] text-(--cz-panel-muted)">
         No components yet. Select a layer and press the ⬦ button in the toolbar to create one.
       </div>
     )
@@ -428,7 +438,7 @@ function ComponentList() {
       {components.map((def) => (
         <li key={def.id}>
           <button
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11.5px] hover:bg-[var(--cz-panel-hover)]"
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11.5px] hover:bg-(--cz-panel-hover)"
             title="Insert instance at canvas center"
             onClick={() => {
               const page = editorStore.activePage()
@@ -451,15 +461,121 @@ function ComponentList() {
               if (id) editorStore.setSelection([id])
             }}
           >
-            <Component className="size-3 shrink-0 text-[var(--cz-ai)]" />
+            <Component className="size-3 shrink-0 text-(--cz-ai)" />
             <span className="truncate">{def.name}</span>
             {def.variantProps?.variant ? (
-              <span className="ml-auto text-[10px] text-[var(--cz-panel-muted)]">{def.variantProps.variant}</span>
+              <span className="ml-auto text-[10px] text-(--cz-panel-muted)">{def.variantProps.variant}</span>
             ) : null}
           </button>
         </li>
       ))}
     </ul>
+  )
+}
+
+/** Center the viewport on a thread's anchor and open its card (switching page if needed). */
+function goToThread(thread: CommentThread) {
+  if (editorStore.doc.activePageId !== thread.pageId) editorStore.setActivePage(thread.pageId)
+  const viewport = document.querySelector<HTMLElement>('[data-canvas]')
+  if (viewport) {
+    const scale = cameraStore.camera.scale
+    cameraStore.set({
+      x: viewport.clientWidth / 2 - thread.x * scale,
+      y: viewport.clientHeight / 2 - thread.y * scale,
+    })
+  }
+  // setActivePage clears the open card, so set it after the page switch.
+  editorStore.setUi({ activeCommentId: thread.id, commentDraft: null })
+}
+
+/**
+ * Comments section: every thread in the document, split into Open and Resolved.
+ * Click a row to fly to its pin and open the thread; resolved rows can be
+ * reopened (by replying in the card) or deleted here.
+ */
+function CommentsPanel() {
+  useDocVersion()
+  // Guard against a malformed/legacy record (no messages) crashing the list;
+  // migrateDocument repairs these on load, this is the in-memory safety net.
+  const threads = (editorStore.doc.comments ?? []).filter(
+    (t) => Array.isArray(t.messages) && t.messages.length > 0,
+  )
+  const open = threads.filter((t) => !t.resolved)
+  const resolved = threads.filter((t) => t.resolved)
+
+  if (threads.length === 0) {
+    return (
+      <div className="px-3 py-3 text-[11px] leading-relaxed text-(--cz-panel-muted)">
+        No comments yet. Pick the Comment tool (C), then click a node or drag an area to start a
+        thread. The MCP agent can read and reply to threads too.
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-col" data-testid="comments-panel">
+      <CommentGroup title="Open" threads={open} />
+      <CommentGroup title="Resolved" threads={resolved} />
+    </div>
+  )
+}
+
+function CommentGroup({ title, threads }: { title: string; threads: CommentThread[] }) {
+  if (threads.length === 0) return null
+  return (
+    <div className="border-b border-(--cz-panel-border) pb-1">
+      <div className="px-3 py-1.5 text-[11px] font-semibold text-(--cz-panel-fg)">
+        {title} · {threads.length}
+      </div>
+      <ul className="flex flex-col gap-0.5 px-2">
+        {threads.map((thread) => (
+          <CommentRow key={thread.id} thread={thread} />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function CommentRow({ thread }: { thread: CommentThread }) {
+  const ui = useUi()
+  const last = thread.messages[thread.messages.length - 1]
+  const active = ui.activeCommentId === thread.id
+  const replies = thread.messages.length - 1
+  return (
+    <li
+      className={`group flex items-start gap-2 rounded px-2 py-1.5 ${
+        active ? 'bg-(--cz-accent)/20' : 'hover:bg-(--cz-panel-hover)'
+      }`}
+    >
+      <button
+        className="flex min-w-0 flex-1 items-start gap-2 text-left"
+        onClick={() => goToThread(thread)}
+      >
+        {thread.resolved ? (
+          <Check className="mt-0.5 size-3 shrink-0 text-[#30d158]" />
+        ) : (
+          <MessageCircle className="mt-0.5 size-3 shrink-0 text-(--cz-accent)" />
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold text-(--cz-panel-fg)">
+              {last.author === 'agent' ? 'Agent' : 'You'}
+            </span>
+            <span className="text-[9px] text-(--cz-panel-muted)">{timeAgo(last.createdAt)}</span>
+            {replies > 0 ? (
+              <span className="text-[9px] text-(--cz-panel-muted)">· {replies + 1}</span>
+            ) : null}
+          </span>
+          <span className="block truncate text-[11px] text-(--cz-panel-fg)">{last.body}</span>
+        </span>
+      </button>
+      <button
+        aria-label="Delete comment"
+        className="mt-0.5 shrink-0 text-(--cz-panel-muted) opacity-0 hover:text-[#FF453A] group-hover:opacity-100"
+        onClick={() => editorStore.deleteCommentThread(thread.id)}
+      >
+        <Trash2 className="size-3" />
+      </button>
+    </li>
   )
 }
 
@@ -471,14 +587,14 @@ function CommandLog() {
     () => editorStore.log,
   )
   if (log.length === 0) {
-    return <div className="px-3 py-2 text-[11px] text-[var(--cz-panel-muted)]">No edits yet.</div>
+    return <div className="px-3 py-2 text-[11px] text-(--cz-panel-muted)">No edits yet.</div>
   }
   return (
     <ul className="flex flex-col-reverse gap-0.5 p-2" data-testid="command-log">
       {log.map((entry) => (
         <li key={entry.id}>
           <button
-            className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[11px] hover:bg-[var(--cz-panel-hover)] ${entry.undone ? 'opacity-40 line-through' : ''}`}
+            className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[11px] hover:bg-(--cz-panel-hover) ${entry.undone ? 'opacity-40 line-through' : ''}`}
             title={`${entry.changed.length} node(s) changed — click to select`}
             onClick={() => {
               const alive = entry.changed.filter((id) => editorStore.doc.nodes[id])
@@ -486,12 +602,12 @@ function CommandLog() {
             }}
           >
             {entry.source === 'ai' ? (
-              <Sparkles className="size-3 shrink-0 text-[var(--cz-ai)]" />
+              <Sparkles className="size-3 shrink-0 text-(--cz-ai)" />
             ) : (
-              <User className="size-3 shrink-0 text-[var(--cz-panel-muted)]" />
+              <User className="size-3 shrink-0 text-(--cz-panel-muted)" />
             )}
             <span className="truncate">{entry.label}</span>
-            <span className="ml-auto shrink-0 text-[9px] tabular-nums text-[var(--cz-panel-muted)]">
+            <span className="ml-auto shrink-0 text-[9px] tabular-nums text-(--cz-panel-muted)">
               {new Date(entry.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
             </span>
           </button>
