@@ -205,19 +205,23 @@ const CSS_URL_RE = /url\s*\(\s*(['"]?)([^'")]*)\1\s*\)/gi
  * property funnels through here — `background` shorthand, `background-image`,
  * `mask-image`, `border-image`, `list-style-image`, etc. — so there is no gap
  * between shorthand and longhand. `data:`/`asset://`/`#frag`/relative refs are
- * kept verbatim; external http(s) and anything unsafe are removed and reported
- * (`external` vs `unsafe`) for the caller's `dropped` list.
+ * kept verbatim. External http(s) refs are KEPT too — same policy as <img src>:
+ * placeholder avatars/photos are a legit agent flow — and returned in `external`
+ * so the caller can warn (the canvas then depends on the network; prefer
+ * import_asset). Only `unsafe` refs are removed, listed in `dropped`.
  */
-export function sanitizeCssUrls(value: string): { value: string; dropped: UrlClass[] } {
+export function sanitizeCssUrls(value: string): { value: string; dropped: UrlClass[]; external: string[] } {
   const dropped: UrlClass[] = []
+  const external: string[] = []
   const out = value.replace(CSS_URL_RE, (match, _q: string, ref: string) => {
     const cls = classifyUrl(ref)
     if (cls === 'safe') return match
+    if (cls === 'external') { external.push(ref); return match }
     dropped.push(cls)
     return ''
   })
   // Collapse leftover whitespace from a removed token inside a shorthand.
-  return { value: out.replace(/\s{2,}/g, ' ').trim(), dropped }
+  return { value: out.replace(/\s{2,}/g, ' ').trim(), dropped, external }
 }
 
 /**
