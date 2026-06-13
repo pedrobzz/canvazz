@@ -106,6 +106,52 @@ export interface AssetModel {
   url: string
 }
 
+/** Who wrote a comment message: the human in the app or the MCP agent. */
+export type CommentAuthor = 'user' | 'agent'
+
+/** One message in a comment thread. */
+export interface CommentMessage {
+  id: string
+  author: CommentAuthor
+  body: string
+  createdAt: number
+  /** Set when the author edits their message. */
+  editedAt?: number
+}
+
+/** World-space rectangle an area comment covers. */
+export interface CommentRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * A comment thread: a conversation pinned to a world point on a page, attached
+ * to one or more nodes (a node comment) or to every node inside a dragged
+ * rectangle (an area comment). The user and the MCP agent both append messages;
+ * `resolved` closes the thread (it can be reopened by a new reply or deleted).
+ * Stored on the document so it persists and round-trips like any other content,
+ * but mutated outside the undo/redo op system — a conversation log is not a
+ * design edit you Ctrl+Z.
+ */
+export interface CommentThread {
+  id: string
+  /** Page the pin lives on. */
+  pageId: string
+  /** World coordinates of the pin anchor. */
+  x: number
+  y: number
+  /** Nodes the thread is attached to; may go stale if a node is deleted. */
+  nodeIds: NodeId[]
+  /** Present for area comments: the world-space rectangle that was dragged. */
+  area?: CommentRect
+  messages: CommentMessage[]
+  resolved: boolean
+  createdAt: number
+}
+
 /**
  * A prototype flow link between two nodes (usually artboards): "this card,
  * when tapped, opens the Detail screen". Model-only — canvas arrow rendering
@@ -136,6 +182,8 @@ export interface DocumentModel {
   assets: Record<string, AssetModel>
   /** Prototype flow links between nodes. Optional for back-compat. */
   flows?: FlowLink[]
+  /** Comment threads pinned to the canvas. Optional for back-compat. */
+  comments?: CommentThread[]
 }
 
 /** Where a node lives: under another node, or at the top level of a page. */
