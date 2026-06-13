@@ -319,7 +319,14 @@ test('W/H sizing modes: fill is direction-aware, values accept %', async ({ page
 
   const pickMode = async (axis: 'W' | 'H', mode: string) => {
     await page.locator(`button[aria-label="${axis} sizing mode"]`).click()
-    await page.getByRole('menuitem', { name: mode }).click()
+    // Wait for the Radix menu to finish opening before clicking an item, and
+    // scope the item to that menu. Under CI load a click could otherwise land
+    // mid-open-animation and never select, leaving the mode unchanged.
+    const menu = page.getByRole('menu')
+    await expect(menu).toBeVisible()
+    const item = menu.getByRole('menuitem', { name: mode })
+    await expect(item).toBeVisible()
+    await item.click()
     // Radix unmounts menus async; wait for full close so the next dropdown
     // click can't land on this menu's exiting items.
     await expect(page.getByRole('menu')).toHaveCount(0)
