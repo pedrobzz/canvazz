@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   quality:
-    name: Typecheck · unit · changeset
+    name: Typecheck, unit, changeset
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +30,8 @@ jobs:
       - name: Require a changeset
         # Fails if the PR changes the package without declaring a version bump.
         # No release needed? add an empty one: `bun run changeset -- --empty`.
+        # Skipped for the bot's "Version Packages" PR, which consumes changesets.
+        if: github.head_ref != 'changeset-release/main'
         run: |
           git fetch origin "${{ github.base_ref }}" --depth=1
           bunx changeset status --since=origin/${{ github.base_ref }}
