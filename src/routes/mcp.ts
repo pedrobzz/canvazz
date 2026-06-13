@@ -233,6 +233,18 @@ server.registerTool('open_page', {
   inputSchema: { project, page: z.string().min(1).describe('Page id or name') },
 }, forward('open_page'))
 
+server.registerTool('rename_page', {
+  title: 'Rename a page',
+  description: 'Set a page’s name (by id or current name). Undoable.',
+  inputSchema: { project, page: z.string().min(1).describe('Page id or name'), name: z.string().min(1).max(60) },
+}, forward('rename_page'))
+
+server.registerTool('delete_page', {
+  title: 'Delete a page',
+  description: 'Remove a page and everything on it. Refuses to delete the only page. Undoable.',
+  inputSchema: { project, page: z.string().min(1).describe('Page id or name') },
+}, forward('delete_page'))
+
 server.registerTool('set_tokens', {
   title: 'Set color/design tokens',
   description:

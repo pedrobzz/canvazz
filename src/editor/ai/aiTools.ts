@@ -547,6 +547,30 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     return { ok: true, pageId: page.id, name: page.name, topLevelCount: page.children.length }
   },
 
+  rename_page(args) {
+    const ref = String(args.page ?? '')
+    const page = store.doc.pages.find((p) => p.id === ref)
+      ?? store.doc.pages.find((p) => p.name.toLowerCase() === ref.toLowerCase())
+    if (!page) throw new Error(`Unknown page: ${ref}. Pages: ${store.doc.pages.map((p) => `${p.name} (${p.id})`).join(', ')}`)
+    const name = String(args.name ?? '').trim().slice(0, 60)
+    if (!name) throw new Error('name is required')
+    store.apply(`AI: rename page ${name}`, [{ t: 'setPageName', id: page.id, name }], 'ai')
+    return { ok: true, pageId: page.id, name, undoable: true }
+  },
+
+  delete_page(args) {
+    const ref = String(args.page ?? '')
+    const page = store.doc.pages.find((p) => p.id === ref)
+      ?? store.doc.pages.find((p) => p.name.toLowerCase() === ref.toLowerCase())
+    if (!page) throw new Error(`Unknown page: ${ref}. Pages: ${store.doc.pages.map((p) => `${p.name} (${p.id})`).join(', ')}`)
+    if (store.doc.pages.length <= 1) throw new Error('Cannot delete the only page in the document')
+    // Empty the page (removePage refuses a non-empty page), then drop it — one transaction.
+    const ops: Op[] = page.children.map((id) => ({ t: 'remove', id }))
+    ops.push({ t: 'removePage', id: page.id })
+    store.apply(`AI: delete page ${page.name}`, ops, 'ai')
+    return { ok: true, deletedPageId: page.id, activePageId: store.doc.activePageId, undoable: true }
+  },
+
   set_tokens(args) {
     const set = args.set as Record<string, string | null>
     if (!set || Object.keys(set).length === 0) throw new Error('set{} is required')
