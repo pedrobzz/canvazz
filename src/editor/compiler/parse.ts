@@ -4,11 +4,14 @@ import {
   SVG_ATTRS,
   SVG_TAGS,
   URL_ATTRS,
+  classifyUrl,
+  cssValuePolicyReject,
   isAllowedAttr,
   isAllowedCssProp,
   isSafeAttrValue,
   isSafeCssValue,
   sanitizeClasses,
+  sanitizeCssUrls,
   sanitizeUrl,
 } from './allowlist'
 import { genId } from '../model/ids'
@@ -27,6 +30,12 @@ export interface ParseResult {
   nodes: NodeModel[]
   rootIds: string[]
   dropped: string[]
+  /**
+   * Non-fatal notices: input that was KEPT but the caller should know about,
+   * e.g. an external `<img src>` that makes the canvas depend on the network.
+   * Optional/additive so downstream callers can ignore it safely.
+   */
+  warnings?: string[]
 }
 
 export interface ParseOptions {
@@ -72,9 +81,36 @@ export function sanitizeStyle(
   dropped?: string[],
 ): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const [prop, value] of parseStyleAttr(text)) {
-    if (isAllowedCssProp(prop) && isSafeCssValue(value)) out[prop] = value
-    else dropped?.push(`css:${prop}`)
+  for (const [prop, rawValue] of parseStyleAttr(text)) {
+    if (!isAllowedCssProp(prop)) {
+      dropped?.push(`css:${prop}`)
+      continue
+    }
+    // Hard security check on the RAW value first: catches javascript:/
+    // expression()/@import/control chars even when buried inside a url(), so
+    // the url stripper can never mangle a payload into something that slips by.
+    if (!isSafeCssValue(rawValue)) {
+      dropped?.push(`css:${prop}`)
+      continue
+    }
+    // Layout-model policy (position: fixed/sticky) — reject with a clear reason
+    // so it never silently applies.
+    if (cssValuePolicyReject(prop, rawValue)) {
+      dropped?.push(`css:${prop} (disallowed value)`)
+      continue
+    }
+    // One url() policy for every url-bearing declaration (shorthand and
+    // longhand alike): keep data:/asset://#frag/relative, strip external
+    // http(s) and anything unsafe, and report each removed reference.
+    const { value, dropped: urlDropped } = sanitizeCssUrls(rawValue)
+    for (const cls of urlDropped) dropped?.push(`css:${prop} url(${cls})`)
+    // An empty value after stripping every url() means the declaration carried
+    // nothing but external refs — drop it rather than emit `prop: `.
+    if (value === '') {
+      if (urlDropped.length === 0) dropped?.push(`css:${prop}`)
+      continue
+    }
+    out[prop] = value
   }
   return out
 }
@@ -107,6 +143,7 @@ function defaultName(tag: string, text?: string): string {
  */
 export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
   const dropped: string[] = []
+  const warnings: string[] = []
   const nodes: NodeModel[] = []
   const usedIds = new Set<string>()
 
@@ -185,8 +222,18 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
         }
       } else if (URL_ATTRS.has(name)) {
         const safe = sanitizeUrl(attr.value)
-        if (safe !== null) node.attrs[name] = safe
-        else dropped.push(`url:${name}`)
+        if (safe !== null) {
+          node.attrs[name] = safe
+          // External <img src> is kept (placeholders are a legit agent flow)
+          // but the canvas now depends on the network — surface it so agents
+          // can switch to a real asset. href to external sites is normal; no
+          // warning there.
+          if (name === 'src' && classifyUrl(safe) === 'external') {
+            warnings.push(
+              `img src kept: external url (${safe}) — canvas now depends on the network; prefer import_asset`,
+            )
+          }
+        } else dropped.push(`url:${name}`)
       } else if (isAllowedAttr(name)) {
         node.attrs[name] = attr.value.slice(0, 1000)
       } else if (!name.startsWith('data-')) {
@@ -244,5 +291,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     }
   }
 
-  return { nodes, rootIds, dropped }
+  return warnings.length > 0
+    ? { nodes, rootIds, dropped, warnings }
+    : { nodes, rootIds, dropped }
 }
