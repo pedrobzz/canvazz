@@ -390,7 +390,7 @@ function AuthorChip({ author }: { author: CommentAuthor }) {
 }
 
 /** Compact relative timestamp ("just now", "5m ago", "3h ago", "2d ago"). */
-function timeAgo(ts: number): string {
+export function timeAgo(ts: number): string {
   const s = Math.round((Date.now() - ts) / 1000)
   if (s < 45) return 'just now'
   const m = Math.round(s / 60)
