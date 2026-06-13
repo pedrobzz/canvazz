@@ -14,6 +14,7 @@ import {
 } from '../components/componentCommands'
 import { sfSymbolMarkup } from '@/components/SFSymbol'
 import { ensureIconRegistries } from '../iconResolver'
+import { closestIconNames, iconNames, scoreIcons } from '../iconResolver'
 import { DEFAULT_WEIGHTS, isValidFamily, syncDocumentFonts, verifyFontLoaded } from '../fonts'
 import { genId } from '../model/ids'
 import { createArtboard } from '../model/factory'
@@ -502,28 +503,68 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   async insert_icon(args) {
-    const name = String(args.name ?? '').trim()
-    if (!name) throw new Error('name is required (Apple SF Symbol name, e.g. "heart.fill")')
+    // One item per icon, normalized from either the array form or the legacy
+    // single-icon args. The whole batch lands in one undoable transaction.
     const variant = args.variant === 'dualtone' ? 'dualtone' : 'monochrome'
-    const size = Math.max(8, Math.min(512, Number(args.size) || 24))
-    const style: Record<string, string> = {}
-    if (args.x !== undefined || args.y !== undefined) {
-      style.position = 'absolute'
-      style.left = `${Number(args.x) || 0}px`
-      style.top = `${Number(args.y) || 0}px`
+    const items: IconRequest[] = Array.isArray(args.icons)
+      ? (args.icons as Json[]).map((it) => normalizeIconRequest(it, args))
+      : [normalizeIconRequest(args, args)]
+    if (items.length === 0) throw new Error('Provide an icon name or a non-empty icons[] array.')
+    if (items.some((it) => !it.name)) {
+      throw new Error('Every icon needs a name (Apple SF Symbol name, e.g. "heart.fill").')
     }
-    if (args.color) style.color = String(args.color)
-    const markup = await sfSymbolMarkup(name, { variant, size, style })
-    if (!markup) {
-      throw new Error(
-        `Unknown SF Symbol: "${name}". Use Apple names like "heart.fill", "pills.fill", "cross.case", "lungs.fill".`,
-      )
+
+    const results: Array<{ name: string; ok: boolean; id?: NodeId; error?: string }> = []
+    const ops: Op[] = []
+    const createdIds: NodeId[] = []
+    // parseHtml dedups against existing ids; track ids minted earlier in this
+    // same batch too so two glyphs never collide before they are applied.
+    const pending = new Set<string>()
+
+    for (const item of items) {
+      const at = locationFor(item.targetId, item.index)
+      const style: Record<string, string> = {}
+      if (item.x !== undefined || item.y !== undefined) {
+        style.position = 'absolute'
+        style.left = `${item.x ?? 0}px`
+        style.top = `${item.y ?? 0}px`
+      }
+      if (item.color) style.color = item.color
+      const markup = await sfSymbolMarkup(item.name, { variant, size: item.size, style })
+      if (!markup) {
+        const closest = await closestIconNames(item.name, variant, 5)
+        results.push({
+          name: item.name,
+          ok: false,
+          error: `Unknown SF Symbol "${item.name}"${closest.length ? ` — closest: ${closest.join(', ')}` : ''}`,
+        })
+        continue
+      }
+      const { nodes, rootIds, dropped } = parseHtml(markup, {
+        isIdTaken: (pid) => Boolean(store.doc.nodes[pid]) || pending.has(pid),
+      })
+      const rootId = rootIds[0]
+      if (!rootId) {
+        results.push({ name: item.name, ok: false, error: `Icon markup rejected: ${dropped.join(', ')}` })
+        continue
+      }
+      const tree = collectFrom(nodes, rootId)
+      for (const n of tree) pending.add(n.id)
+      ops.push({ t: 'insertTree', nodes: tree, rootId, at })
+      createdIds.push(rootId)
+      results.push({ name: item.name, ok: true, id: rootId })
     }
-    const at = locationFor(args.targetId as string | undefined, args.index as number | undefined)
-    const { rootIds, dropped } = insertHtml({ ...AI }, markup, at, `AI: insert icon ${name}`)
-    if (rootIds.length === 0) throw new Error(`Icon markup rejected: ${dropped.join(', ')}`)
-    store.setSelection(rootIds)
-    return { ...mutationResult('insert_icon', rootIds), symbol: name, dropped }
+
+    if (ops.length === 0) {
+      const errors = results.map((r) => r.error).filter(Boolean).join('; ')
+      throw new Error(errors || 'No icons could be inserted.')
+    }
+    const label = createdIds.length === 1
+      ? `AI: insert icon ${results.find((r) => r.ok)?.name}`
+      : `AI: insert ${createdIds.length} icons`
+    store.apply(label, ops, 'ai')
+    store.setSelection(createdIds)
+    return { ...mutationResult('insert_icon', createdIds), variant, createdIds, icons: results }
   },
 
   create_page(args) {
@@ -619,6 +660,48 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       nodeCount: Object.keys(store.doc.nodes).length,
     }
   },
+
+  async search_icons(args) {
+    const query = String(args.query ?? '').trim()
+    if (!query) throw new Error('query is required (e.g. "document", "arrow up", "trash")')
+    const variant = args.variant === 'dualtone' ? 'dualtone' : 'monochrome'
+    const limit = Math.max(1, Math.min(50, Number(args.limit) || 12))
+    const names = await iconNames(variant)
+    const matches = scoreIcons(query, names, limit)
+    return {
+      query,
+      variant,
+      count: matches.length,
+      matches,
+      hint: matches.length === 0
+        ? 'No matches — try a broader single word (the registry uses Apple names like "doc", "tray", "person").'
+        : 'Pass any name to insert_icon. Names are exact Apple SF Symbol names.',
+    }
+  },
+}
+
+interface IconRequest {
+  name: string
+  targetId?: string
+  size: number
+  color?: string
+  x?: number
+  y?: number
+  index?: number
+}
+
+/** Normalize one icon spec, falling back to batch-level defaults. */
+function normalizeIconRequest(it: Json, defaults: Json): IconRequest {
+  const sizeRaw = it.size ?? defaults.size
+  return {
+    name: String(it.name ?? '').trim(),
+    targetId: (it.targetId ?? defaults.targetId) as string | undefined,
+    size: Math.max(8, Math.min(512, Number(sizeRaw) || 24)),
+    color: it.color !== undefined ? String(it.color) : undefined,
+    x: it.x !== undefined ? Number(it.x) || 0 : undefined,
+    y: it.y !== undefined ? Number(it.y) || 0 : undefined,
+    index: it.index !== undefined ? Number(it.index) : undefined,
+  }
 }
 
 function collectFrom(nodes: NodeModel[], rootId: string): NodeModel[] {

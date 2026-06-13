@@ -206,13 +206,24 @@ server.registerTool('get_screenshot', {
 }, forward('get_screenshot', 45_000))
 
 server.registerTool('insert_icon', {
-  title: 'Insert an SF Symbol icon',
+  title: 'Insert one or many SF Symbol icons',
   description:
-    'Place one of 7,007 Apple SF Symbols on the canvas as editable vector nodes. Address by Apple name ("heart.fill", "pills.fill", "wind", "lungs"). Color via the color arg or restyle later (CSS color / currentColor).',
+    'Place Apple SF Symbols on the canvas as editable vector nodes. Address by exact Apple name ("heart.fill", "pills.fill", "wind", "lungs") — use search_icons first if unsure. Pass one icon via the top-level args, or many via icons[] (each placed in one undoable transaction). Unknown names return the closest real matches. Color via the color arg or restyle later (CSS color / currentColor).',
   inputSchema: {
     project,
-    name: z.string().min(1).describe('SF Symbol name, e.g. "cross.case.fill"'),
-    variant: z.enum(['monochrome', 'dualtone']).optional().describe('Default monochrome'),
+    name: z.string().min(1).optional().describe('Single-icon form: SF Symbol name, e.g. "cross.case.fill"'),
+    icons: z
+      .array(z.object({
+        name: z.string().min(1).describe('SF Symbol name'),
+        targetId: z.string().optional().describe('Container node; default page level'),
+        size: z.number().optional(),
+        color: z.string().optional(),
+        x: z.number().optional(), y: z.number().optional(),
+        index: z.number().int().optional(),
+      }))
+      .optional()
+      .describe('Batch form: place several icons at once. Per-item fields override the top-level defaults.'),
+    variant: z.enum(['monochrome', 'dualtone']).optional().describe('Default monochrome (applies to the whole batch)'),
     size: z.number().optional().describe('Pixel size, default 24'),
     targetId: z.string().optional().describe('Container node; default page level'),
     x: z.number().optional(), y: z.number().optional(),
@@ -437,6 +448,18 @@ server.registerTool('finish', {
     'CALL WHEN DONE. Clears AI change indicators, returns the recent edit log and document stats. Provide a one-line summary of what you did.',
   inputSchema: { project, summary: z.string().optional() },
 }, forward('finish'))
+
+server.registerTool('search_icons', {
+  title: 'Search SF Symbols by name',
+  description:
+    'Fuzzy-search the 7,007 Apple SF Symbols by name or plain English ("document", "arrow up", "trash"). Returns ranked exact Apple names with scores — feed any of them straight to insert_icon instead of guessing names.',
+  inputSchema: {
+    project,
+    query: z.string().min(1).describe('What to find, e.g. "document", "chevron right", "person crop"'),
+    variant: z.enum(['monochrome', 'dualtone']).optional().describe('Default monochrome'),
+    limit: z.number().int().optional().describe('Max matches, default 12, max 50'),
+  },
+}, forward('search_icons'))
 
 export const Route = createFileRoute('/mcp')({
   server: {
