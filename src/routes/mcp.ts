@@ -72,13 +72,15 @@ function forward(tool: string, timeoutMs = 20_000) {
         typeof result === 'object' &&
         'dataUrl' in result
       ) {
-        const { dataUrl, width, height } = result as { dataUrl: string; width: number; height: number }
+        const { dataUrl, ...meta } = result as { dataUrl: string } & Record<string, unknown>
         const match = /^data:(image\/\w+);base64,(.+)$/.exec(dataUrl)
         if (match) {
+          // Keep the image content; forward width/height plus the new
+          // capturedRect/scale/warnings as the JSON text part.
           return {
             content: [
               { type: 'image', data: match[2], mimeType: match[1] },
-              { type: 'text', text: JSON.stringify({ width, height }) },
+              { type: 'text', text: JSON.stringify(meta) },
             ],
           }
         }
@@ -201,8 +203,20 @@ server.registerTool('get_computed_styles', {
 
 server.registerTool('get_screenshot', {
   title: 'Screenshot artboard or node',
-  description: 'PNG of a node or the first artboard. Use to visually verify your edits.',
-  inputSchema: { project, id: z.string().optional().describe('Node/artboard id; default first artboard') },
+  description:
+    'PNG of a node or the first artboard. Use to visually verify edits. Tall artboards: read them band-by-band with region (node-relative crop) at 1:1, or raise maxEdge up to 4096. Node shots composite the nearest ancestor background and warn when a gradient can only be approximated.',
+  inputSchema: {
+    project,
+    id: z.string().optional().describe('Node/artboard id; default first artboard'),
+    maxEdge: z.number().int().optional().describe('Long-edge pixel cap before downscaling; default 1200, max 4096'),
+    scale: z.number().optional().describe('Force a capture scale (clamped so the long edge stays within maxEdge)'),
+    region: z
+      .object({
+        x: z.number(), y: z.number(), width: z.number().optional(), height: z.number().optional(),
+      })
+      .optional()
+      .describe('Node-relative crop in px (1:1 unless scale is set). Omit width/height to run to the node edge.'),
+  },
 }, forward('get_screenshot', 45_000))
 
 server.registerTool('insert_icon', {
