@@ -41,7 +41,8 @@ function toMeta(row: MetaRow): ProjectMeta {
 export async function listProjectsQuery(): Promise<ProjectMeta[]> {
   const client = await db()
   const result = await client.execute(
-    `SELECT ${META_COLS} FROM projects ORDER BY updated_at DESC`,
+    // rowid breaks updated_at ties (same-ms inserts) so the order is stable.
+    `SELECT ${META_COLS} FROM projects ORDER BY updated_at DESC, rowid DESC`,
   )
   return (result.rows as unknown as MetaRow[]).map(toMeta)
 }
