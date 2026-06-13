@@ -64,6 +64,13 @@ type Gesture =
       startWorldY: number
       container: DrawContainer
     }
+  | {
+      type: 'comment'
+      startWorldX: number
+      startWorldY: number
+      /** Highlighted node at press time — the click-comment's attach target. */
+      hoverId: NodeId | null
+    }
 
 /**
  * Dragged node. Absolutely-positioned nodes move via left/top; flow children
@@ -161,7 +168,20 @@ export class InteractionController {
     }
     if (e.button !== 0) return
 
+    // A press on the canvas (never on a pin/card — those are data-cz-ui and
+    // bailed above) dismisses an open comment thread card.
+    if (store.ui.activeCommentId) store.setUi({ activeCommentId: null })
+
     const tool = store.ui.tool
+
+    if (tool === 'comment') {
+      const world = this.toWorld(e)
+      this.gesture = {
+        type: 'comment', startWorldX: world.x, startWorldY: world.y, hoverId: store.ui.hoverId,
+      }
+      this.viewport.setPointerCapture(e.pointerId)
+      return
+    }
 
     if (SHAPE_TOOLS.has(tool)) {
       this.startDraw(e, tool)
@@ -307,6 +327,10 @@ export class InteractionController {
       }
       case 'draw': {
         this.finishDraw(g, e)
+        break
+      }
+      case 'comment': {
+        this.finishComment(g, e)
         break
       }
       case 'marquee':
@@ -482,6 +506,21 @@ export class InteractionController {
           { x: e.clientX - this.viewport.getBoundingClientRect().left, y: e.clientY - this.viewport.getBoundingClientRect().top + 24 },
           `${Math.round(rect.width)} × ${Math.round(rect.height)}`,
         )
+        break
+      }
+      case 'comment': {
+        // Dragging marks an area; the marquee shows the region being covered.
+        const world = this.toWorld(e)
+        const rect: Rect = {
+          x: Math.min(g.startWorldX, world.x), y: Math.min(g.startWorldY, world.y),
+          width: Math.abs(world.x - g.startWorldX), height: Math.abs(world.y - g.startWorldY),
+        }
+        this.overlay.setMarquee({
+          x: rect.x * camera.scale + camera.x,
+          y: rect.y * camera.scale + camera.y,
+          width: rect.width * camera.scale,
+          height: rect.height * camera.scale,
+        })
         break
       }
       case 'idle':
@@ -669,6 +708,36 @@ export class InteractionController {
     if (g.tool === 'text') this.store.setUi({ editingTextId: node.id })
   }
 
+  /**
+   * End a comment gesture: a click pins a node comment to the highlighted node
+   * (or free-floating on empty canvas); a drag pins an area comment attached to
+   * every node the rect covers. Either way we open the composer (commentDraft)
+   * and drop back to the select tool so the next click edits, not re-comments.
+   */
+  private finishComment(g: Extract<Gesture, { type: 'comment' }>, e: PointerEvent) {
+    const world = this.toWorld(e)
+    const rect: Rect = {
+      x: Math.min(g.startWorldX, world.x), y: Math.min(g.startWorldY, world.y),
+      width: Math.abs(world.x - g.startWorldX), height: Math.abs(world.y - g.startWorldY),
+    }
+    const isArea = rect.width >= 6 || rect.height >= 6
+    if (isArea) {
+      this.store.setUi({
+        commentDraft: { x: rect.x, y: rect.y, nodeIds: this.marqueeHits(rect), area: rect },
+        activeCommentId: null,
+        hoverId: null,
+      })
+    } else {
+      const target = g.hoverId ? parsePathId(g.hoverId).sourceId : null
+      this.store.setUi({
+        commentDraft: { x: g.startWorldX, y: g.startWorldY, nodeIds: target ? [target] : [] },
+        activeCommentId: null,
+        hoverId: null,
+      })
+    }
+    this.store.setTool('select')
+  }
+
   // --- Wheel / zoom --------------------------------------------------------
 
   private onWheel(e: WheelEvent) {
@@ -824,12 +893,14 @@ export class InteractionController {
 
     const toolKeys: Record<string, Tool> = {
       v: 'select', h: 'hand', f: 'frame', t: 'text', r: 'rect',
-      o: 'ellipse', l: 'line', p: 'polygon', s: 'star',
+      o: 'ellipse', l: 'line', p: 'polygon', s: 'star', c: 'comment',
     }
     const tool = toolKeys[e.key.toLowerCase()]
     if (tool) {
       store.setTool(tool)
-      this.setCursor(tool === 'hand' ? 'grab' : SHAPE_TOOLS.has(tool) ? 'crosshair' : '')
+      this.setCursor(
+        tool === 'hand' ? 'grab' : SHAPE_TOOLS.has(tool) || tool === 'comment' ? 'crosshair' : '',
+      )
     }
   }
 
