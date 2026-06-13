@@ -292,13 +292,15 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     const w = world()
     if (!w) throw new Error('Canvas not mounted')
     let el: HTMLElement | null
+    let targetId: NodeId | undefined
     if (id) {
       requireNode(id)
       el = nodeElement(w, id)
+      targetId = id
     } else {
       const page = store.activePage()
-      const firstArtboard = page.children.find((n) => store.doc.nodes[n]?.isArtboard)
-      el = firstArtboard ? nodeElement(w, firstArtboard) : null
+      targetId = page.children.find((n) => store.doc.nodes[n]?.isArtboard)
+      el = targetId ? nodeElement(w, targetId) : null
     }
     if (!el) throw new Error('Nothing to screenshot — create an artboard first.')
 
@@ -307,50 +309,32 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     // Crop region (node-relative px) clamped into the node box. Default: whole node.
     const region = clampRegion(args.region as Json | undefined, fullW, fullH)
     const maxEdge = Math.max(1, Math.min(4096, Number(args.maxEdge) || 1200))
-    // scale, if given, is honored up to the maxEdge ceiling; otherwise we
-    // downscale only when the long edge exceeds maxEdge (1:1 below that).
+    // Default: downscale only when the long edge exceeds maxEdge (1:1 below).
+    // An explicit `scale` is honored in BOTH directions — including >1 for
+    // hi-dpi crops — up to the maxEdge ceiling.
+    const longEdge = Math.max(region.width, region.height, 1)
     const requested = Number(args.scale)
-    const fit = Math.min(1, maxEdge / Math.max(region.width, region.height, 1))
-    const scale = requested > 0 ? Math.min(requested, fit) : fit
+    const scale = requested > 0 ? Math.min(requested, maxEdge / longEdge) : Math.min(1, maxEdge / longEdge)
 
     const warnings: string[] = []
     const bg = effectiveBackground(el, warnings)
-    // Capture the full node at the target scale, then crop to the region.
-    // Neutralize the node's canvas placement (absolute left/top) WITHOUT
-    // forcing `static`: static stops the node being a containing block, so an
-    // absolutely-positioned child (a hero <h1>) re-anchors to an outer ancestor
-    // and vanishes from the box. `relative` with zero offsets renders at the
-    // same origin yet still contains abs children. `flow-root` adds a block
-    // formatting context so a plain block's child top-margin can't collapse out
-    // of the box and clip. pixelRatio < 1 renders blank, so downscale via the
-    // canvas dimensions.
-    const style: Record<string, string> = {
-      transform: 'none', rotate: 'none', position: 'relative', left: '0px', top: '0px', margin: '0',
-    }
-    const display = getComputedStyle(el).display
-    if (display === 'block' || display === 'inline-block' || display === 'inline') {
-      style.display = 'flow-root'
-    }
-    if (bg.image) style.backgroundImage = bg.image
-    const dataUrlFull = await toPng(el, {
-      pixelRatio: 1,
-      canvasWidth: Math.round(fullW * scale),
-      canvasHeight: Math.round(fullH * scale),
-      skipFonts: true,
-      backgroundColor: bg.color,
-      style,
-    })
+    const dataUrlFull = await captureNodePng(el, fullW, fullH, scale, bg)
 
     const cropped =
       region.x === 0 && region.y === 0 && region.width === fullW && region.height === fullH
         ? { dataUrl: dataUrlFull, width: Math.round(fullW * scale), height: Math.round(fullH * scale) }
         : await cropDataUrl(dataUrlFull, region, scale)
 
+    // Report the world-space rect actually captured (x/y were hard-anchored to
+    // 0 before, so multi-artboard callers had no idea what they got).
+    const worldRect = targetId ? rectOf(targetId) : null
     return {
       dataUrl: cropped.dataUrl,
       width: cropped.width,
       height: cropped.height,
-      capturedRect: region,
+      capturedRect: worldRect
+        ? { x: worldRect.x + region.x, y: worldRect.y + region.y, width: region.width, height: region.height }
+        : region,
       scale: Math.round(scale * 1000) / 1000,
       ...(warnings.length ? { warnings } : {}),
     }
@@ -1221,6 +1205,61 @@ function effectiveBackground(el: HTMLElement, warnings: string[]): { color?: str
   const resolved = resolveBackgroundLayers(backgroundLayers(el))
   warnings.push(...resolved.warnings)
   return { color: resolved.color, image: resolved.image }
+}
+
+/**
+ * Rasterize a canvas node to a PNG data URL. Two facts force a detached clone
+ * rather than `toPng(node)` directly:
+ *  - html-to-image cannot capture a top-level `position:absolute` node living
+ *    under the camera's world transform — it rasterizes the world-origin region
+ *    instead of the node, so any artboard not at (0,0) came back blank (#21).
+ *  - the document's tokens are CSS custom properties on `[data-canvas-world]`,
+ *    so a node detached from it loses them and SVG `fill`/`stroke: var(--token)`
+ *    paint nothing (fill → black, stroke → invisible) (#22).
+ * Cloning into a fixed, origin-anchored wrapper mounted outside the world
+ * transform — and re-declaring the tokens on it — fixes both at once. We
+ * neutralize the clone's own placement: `relative` (not `static`) keeps it a
+ * containing block for absolute children; `flow-root` stops a child's top
+ * margin collapsing out of the box and clipping; pixelRatio < 1 renders blank
+ * in html-to-image, so we downscale via the canvas dimensions instead.
+ */
+async function captureNodePng(
+  el: HTMLElement,
+  fullW: number,
+  fullH: number,
+  scale: number,
+  bg: { color?: string; image?: string },
+): Promise<string> {
+  const ownStyle = getComputedStyle(el)
+  const wrap = document.createElement('div')
+  wrap.style.cssText =
+    `position:fixed;left:0;top:0;z-index:-2147483648;pointer-events:none;width:${fullW}px;height:${fullH}px`
+  wrap.style.fontFamily = ownStyle.fontFamily
+  wrap.style.color = ownStyle.color
+  for (const [name, value] of Object.entries(store.doc.tokens)) {
+    wrap.style.setProperty(name.startsWith('--') ? name : `--${name}`, value)
+  }
+  const clone = el.cloneNode(true) as HTMLElement
+  Object.assign(clone.style, {
+    transform: 'none', rotate: 'none', position: 'relative', left: '0px', top: '0px', margin: '0',
+  })
+  if (ownStyle.display === 'block' || ownStyle.display === 'inline-block' || ownStyle.display === 'inline') {
+    clone.style.display = 'flow-root'
+  }
+  if (bg.image) clone.style.backgroundImage = bg.image
+  wrap.appendChild(clone)
+  document.body.appendChild(wrap)
+  try {
+    return await toPng(wrap, {
+      pixelRatio: 1,
+      canvasWidth: Math.round(fullW * scale),
+      canvasHeight: Math.round(fullH * scale),
+      skipFonts: true,
+      backgroundColor: bg.color,
+    })
+  } finally {
+    wrap.remove()
+  }
 }
 
 /** Crop a full-node PNG to a node-relative region (already in scaled px). */
