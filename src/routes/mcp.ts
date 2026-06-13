@@ -229,9 +229,26 @@ server.registerTool('create_page', {
 
 server.registerTool('open_page', {
   title: 'Switch the visible page',
-  description: 'Open a page by id or name (see get_basic_info → pages). Artboards you create land on the active page.',
-  inputSchema: { project, page: z.string().min(1).describe('Page id or name') },
+  description: 'Open a page by id or name (see get_basic_info → pages); name matching is case-insensitive. Artboards you create land on the active page.',
+  inputSchema: { project, page: z.string().min(1).describe('Page id or name (name match is case-insensitive)') },
 }, forward('open_page'))
+
+server.registerTool('rename_page', {
+  title: 'Rename a page',
+  description: 'Rename a page (by id or case-insensitive name). The hidden Design System page cannot be renamed.',
+  inputSchema: {
+    project,
+    page: z.string().min(1).describe('Page id or name (name match is case-insensitive)'),
+    name: z.string().min(1).max(60),
+  },
+}, forward('rename_page'))
+
+server.registerTool('delete_page', {
+  title: 'Delete a page',
+  description:
+    'Delete a page and all its contents (by id or case-insensitive name). Refuses to delete the only user page or the hidden Design System page. Undoable.',
+  inputSchema: { project, page: z.string().min(1).describe('Page id or name (name match is case-insensitive)') },
+}, forward('delete_page'))
 
 server.registerTool('set_tokens', {
   title: 'Set color/design tokens',

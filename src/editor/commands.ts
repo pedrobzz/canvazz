@@ -1,4 +1,4 @@
-import { collectSubtree } from './model/doc'
+import { collectSubtree, DESIGN_SYSTEM_PAGE_ID } from './model/doc'
 import { cloneSubtree } from './model/factory'
 import { genId } from './model/ids'
 import { exportHtml } from './compiler/export'
@@ -311,6 +311,63 @@ export function setVisibility(ctx: CommandCtx, id: NodeId, visible: boolean) {
 
 export function setLocked(ctx: CommandCtx, id: NodeId, locked: boolean) {
   ctx.store.apply(locked ? 'Lock' : 'Unlock', [{ t: 'setProps', id, patch: { locked } }], src(ctx))
+}
+
+// --- pages ------------------------------------------------------------------
+
+/** The hidden component-definition page is never a "user page". */
+export const isDesignSystemPage = (pageId: string) => pageId === DESIGN_SYSTEM_PAGE_ID
+
+/** Pages a user can navigate, rename, and delete — excludes the Design System page. */
+export function userPages(store: EditorStore) {
+  return store.doc.pages.filter((p) => !isDesignSystemPage(p.id))
+}
+
+export interface PageGuardError {
+  ok: false
+  reason: string
+}
+
+/**
+ * Delete a page and all its contents in one undoable transaction. Refuses the
+ * Design System page outright and the last remaining USER page (the hidden
+ * Design System page must not satisfy the guard). Returns the deleted page id.
+ */
+export function deletePage(
+  ctx: CommandCtx,
+  pageId: string,
+): { ok: true; deletedPageId: string; activePageId: string } | PageGuardError {
+  const { store } = ctx
+  const page = store.doc.pages.find((p) => p.id === pageId)
+  if (!page) return { ok: false, reason: `Unknown page: ${pageId}` }
+  if (isDesignSystemPage(pageId)) {
+    return { ok: false, reason: 'The Design System page cannot be deleted (it holds component definitions).' }
+  }
+  if (userPages(store).length <= 1) {
+    return { ok: false, reason: 'Cannot delete the only page. A document must keep at least one page.' }
+  }
+  const ops: Op[] = page.children.map((cid) => ({ t: 'remove', id: cid }) as Op)
+  ops.push({ t: 'removePage', id: pageId })
+  store.apply(`Delete page ${page.name}`, ops, src(ctx))
+  return { ok: true, deletedPageId: pageId, activePageId: store.doc.activePageId }
+}
+
+/** Rename a page. Refuses the Design System page. */
+export function renamePage(
+  ctx: CommandCtx,
+  pageId: string,
+  name: string,
+): { ok: true; name: string } | PageGuardError {
+  const { store } = ctx
+  const page = store.doc.pages.find((p) => p.id === pageId)
+  if (!page) return { ok: false, reason: `Unknown page: ${pageId}` }
+  if (isDesignSystemPage(pageId)) {
+    return { ok: false, reason: 'The Design System page cannot be renamed (it holds component definitions).' }
+  }
+  const clean = name.slice(0, 60)
+  if (!clean.trim()) return { ok: false, reason: 'name is required' }
+  store.apply(`Rename page ${clean}`, [{ t: 'setPageName', id: pageId, name: clean }], src(ctx))
+  return { ok: true, name: clean }
 }
 
 // --- helpers ---------------------------------------------------------------
