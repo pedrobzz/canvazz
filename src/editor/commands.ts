@@ -1,13 +1,13 @@
-import { collectSubtree } from './model/doc'
+import { collectSubtree, DESIGN_SYSTEM_PAGE_ID } from './model/doc'
 import { cloneSubtree } from './model/factory'
 import { genId } from './model/ids'
 import { exportHtml } from './compiler/export'
-import { parseHtml } from './compiler/parse'
+import { defaultName, parseHtml } from './compiler/parse'
 import { SVG_TAGS } from './compiler/allowlist'
 import { px, fmtPx } from './canvas/geometry'
 import type { Rect } from './canvas/geometry'
 import type { EditorStore } from './store/editorStore'
-import type { NodeId, NodeLocation, NodeModel, Op, TransactionSource } from './model/types'
+import type { NodeId, NodeLocation, NodeModel, NodePropsPatch, Op, TransactionSource } from './model/types'
 
 /**
  * Shared editing commands over the store. Both human input (keyboard,
@@ -180,19 +180,30 @@ export function setTextContent(ctx: CommandCtx, id: NodeId, text: string) {
   const { store } = ctx
   const node = store.doc.nodes[id]
   if (!node) return
+  const patch: NodePropsPatch = { text }
+  // If the layer name was auto-derived from the old text (never hand-named),
+  // refresh it from the new text so the tree doesn't show stale labels.
+  const oldText = node.text ?? ''
+  if (node.name === defaultName(node.tag, oldText)) {
+    patch.name = defaultName(node.tag, text)
+  }
   if (node.children.length > 0) {
     // Editing flattened rich text: replace children with the plain string.
     const ops: Op[] = node.children.map((c) => ({ t: 'remove', id: c }) as Op)
-    ops.push({ t: 'setProps', id, patch: { text } })
+    ops.push({ t: 'setProps', id, patch })
     store.apply('Edit text', ops, src(ctx))
   } else {
-    store.apply('Edit text', [{ t: 'setProps', id, patch: { text } }], src(ctx))
+    store.apply('Edit text', [{ t: 'setProps', id, patch }], src(ctx))
   }
 }
 
 export interface InsertResult {
   rootIds: NodeId[]
   dropped: string[]
+  /** Every node created by the parse, in document order. */
+  nodes: NodeModel[]
+  /** Non-fatal sanitizer warnings, when the parser reports them. */
+  warnings?: string[]
 }
 
 /** Parse untrusted HTML and insert it at a location, as one transaction. */
@@ -203,10 +214,10 @@ export function insertHtml(
   label = 'Insert',
 ): InsertResult {
   const { store } = ctx
-  const { nodes, rootIds, dropped } = parseHtml(html, {
-    isIdTaken: (id) => Boolean(store.doc.nodes[id]),
-  })
-  if (rootIds.length === 0) return { rootIds: [], dropped }
+  const result = parseHtml(html, { isIdTaken: (id) => Boolean(store.doc.nodes[id]) })
+  const { nodes, rootIds, dropped } = result
+  const warnings = (result as { warnings?: string[] }).warnings
+  if (rootIds.length === 0) return { rootIds: [], dropped, nodes, ...(warnings?.length ? { warnings } : {}) }
   const byId = new Map(nodes.map((n) => [n.id, n]))
   const collect = (id: NodeId): NodeModel[] => {
     const node = byId.get(id)
@@ -220,7 +231,7 @@ export function insertHtml(
     at: { ...at, index: at.index + i },
   }))
   store.apply(label, ops, src(ctx))
-  return { rootIds, dropped }
+  return { rootIds, dropped, nodes, ...(warnings?.length ? { warnings } : {}) }
 }
 
 /**
@@ -236,11 +247,11 @@ export function replaceNodeHtml(
   const { store } = ctx
   const target = store.doc.nodes[targetId]
   const at = locate(store, targetId)
-  if (!target || !at) return { rootIds: [], dropped: [] }
-  const { nodes, rootIds, dropped } = parseHtml(html, {
-    isIdTaken: (id) => Boolean(store.doc.nodes[id]),
-  })
-  if (rootIds.length === 0) return { rootIds: [], dropped }
+  if (!target || !at) return { rootIds: [], dropped: [], nodes: [] }
+  const result = parseHtml(html, { isIdTaken: (id) => Boolean(store.doc.nodes[id]) })
+  const { nodes, rootIds, dropped } = result
+  const warnings = (result as { warnings?: string[] }).warnings
+  if (rootIds.length === 0) return { rootIds: [], dropped, nodes, ...(warnings?.length ? { warnings } : {}) }
   const byId = new Map(nodes.map((n) => [n.id, n]))
   const collect = (id: NodeId): NodeModel[] => {
     const node = byId.get(id)
@@ -251,7 +262,7 @@ export function replaceNodeHtml(
     ops.push({ t: 'insertTree', nodes: collect(rootId), rootId, at: { ...at, index: at.index + i } })
   })
   store.apply(label, ops, src(ctx))
-  return { rootIds, dropped }
+  return { rootIds, dropped, nodes, ...(warnings?.length ? { warnings } : {}) }
 }
 
 /** Serialize nodes to sanitized HTML (the copy payload). */
@@ -311,6 +322,97 @@ export function setVisibility(ctx: CommandCtx, id: NodeId, visible: boolean) {
 
 export function setLocked(ctx: CommandCtx, id: NodeId, locked: boolean) {
   ctx.store.apply(locked ? 'Lock' : 'Unlock', [{ t: 'setProps', id, patch: { locked } }], src(ctx))
+}
+
+// --- pages ------------------------------------------------------------------
+
+/** The hidden component-definition page is never a "user page". */
+export const isDesignSystemPage = (pageId: string) => pageId === DESIGN_SYSTEM_PAGE_ID
+
+/** Pages a user can navigate, rename, and delete — excludes the Design System page. */
+export function userPages(store: EditorStore) {
+  return store.doc.pages.filter((p) => !isDesignSystemPage(p.id))
+}
+
+export interface PageGuardError {
+  ok: false
+  reason: string
+}
+
+/**
+ * Delete a page and all its contents in one undoable transaction. Refuses the
+ * Design System page outright and the last remaining USER page (the hidden
+ * Design System page must not satisfy the guard). Returns the deleted page id.
+ */
+export function deletePage(
+  ctx: CommandCtx,
+  pageId: string,
+): { ok: true; deletedPageId: string; activePageId: string } | PageGuardError {
+  const { store } = ctx
+  const page = store.doc.pages.find((p) => p.id === pageId)
+  if (!page) return { ok: false, reason: `Unknown page: ${pageId}` }
+  if (isDesignSystemPage(pageId)) {
+    return { ok: false, reason: 'The Design System page cannot be deleted (it holds component definitions).' }
+  }
+  if (userPages(store).length <= 1) {
+    return { ok: false, reason: 'Cannot delete the only page. A document must keep at least one page.' }
+  }
+  const ops: Op[] = page.children.map((cid) => ({ t: 'remove', id: cid }) as Op)
+  ops.push({ t: 'removePage', id: pageId })
+  store.apply(`Delete page ${page.name}`, ops, src(ctx))
+  return { ok: true, deletedPageId: pageId, activePageId: store.doc.activePageId }
+}
+
+/** Rename a page. Refuses the Design System page. */
+export function renamePage(
+  ctx: CommandCtx,
+  pageId: string,
+  name: string,
+): { ok: true; name: string } | PageGuardError {
+  const { store } = ctx
+  const page = store.doc.pages.find((p) => p.id === pageId)
+  if (!page) return { ok: false, reason: `Unknown page: ${pageId}` }
+  if (isDesignSystemPage(pageId)) {
+    return { ok: false, reason: 'The Design System page cannot be renamed (it holds component definitions).' }
+  }
+  const clean = name.slice(0, 60)
+  if (!clean.trim()) return { ok: false, reason: 'name is required' }
+  store.apply(`Rename page ${clean}`, [{ t: 'setPageName', id: pageId, name: clean }], src(ctx))
+  return { ok: true, name: clean }
+}
+
+/**
+ * Deep-copy a page: clone every top-level subtree with fresh ids (reusing the
+ * duplicate machinery), preserve relative layout, append the new page right
+ * after the source, and switch to it. Instances stay linked to the same
+ * components. One undoable transaction; undo removes the page cleanly.
+ */
+export function duplicatePage(
+  ctx: CommandCtx,
+  pageId: string,
+  name?: string,
+): { ok: true; pageId: string; name: string; nodeCount: number } | PageGuardError {
+  const { store } = ctx
+  const source = store.doc.pages.find((p) => p.id === pageId)
+  if (!source) return { ok: false, reason: `Unknown page: ${pageId}` }
+  const newPageId = genId('page')
+  const newName = name?.slice(0, 60).trim() || `${source.name} copy`
+  const index = store.doc.pages.findIndex((p) => p.id === pageId) + 1
+  const ops: Op[] = [{ t: 'addPage', page: { id: newPageId, name: newName, children: [] }, index }]
+  let nodeCount = 0
+  source.children.forEach((childId, i) => {
+    const clone = cloneSubtree(store.doc.nodes, childId)
+    nodeCount += clone.nodes.length
+    ops.push({
+      t: 'insertTree',
+      nodes: clone.nodes,
+      rootId: clone.rootId,
+      at: { kind: 'page', pageId: newPageId, index: i },
+    })
+  })
+  store.apply(`Duplicate page ${source.name}`, ops, src(ctx))
+  store.setActivePage(newPageId)
+  return { ok: true, pageId: newPageId, name: newName, nodeCount }
 }
 
 // --- helpers ---------------------------------------------------------------

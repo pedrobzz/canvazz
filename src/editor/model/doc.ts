@@ -16,6 +16,14 @@ import type {
  * and per-node subscriptions rely on this).
  */
 
+/**
+ * The dedicated page that holds every main component definition. It is hidden
+ * from normal page navigation and protected from rename/delete; it must never
+ * count as a "user page" in last-page guards. Canonical home for the id so the
+ * model layer can protect it without importing the component command layer.
+ */
+export const DESIGN_SYSTEM_PAGE_ID = 'page_design_system'
+
 export interface ApplyResult {
   doc: DocumentModel
   /** Inverse ops in application-reverse order: apply as-is to undo. */
@@ -254,7 +262,11 @@ function applyOp(draft: Draft, op: Op): Op {
       if (index < 0) throw new Error(`Unknown page: ${op.id}`)
       const [page] = pages.splice(index, 1)
       if (page.children.length > 0) throw new Error(`Page ${op.id} is not empty`)
-      if (draft.doc.activePageId === op.id) draft.doc.activePageId = pages[0]?.id ?? ''
+      if (draft.doc.activePageId === op.id) {
+        // Land on a real user page, not the hidden Design System page.
+        const fallback = pages.find((p) => p.id !== DESIGN_SYSTEM_PAGE_ID) ?? pages[0]
+        draft.doc.activePageId = fallback?.id ?? ''
+      }
       return { t: 'addPage', page, index }
     }
     case 'setPageName': {

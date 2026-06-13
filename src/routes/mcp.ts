@@ -255,20 +255,25 @@ server.registerTool('create_page', {
 
 server.registerTool('open_page', {
   title: 'Switch the visible page',
-  description: 'Open a page by id or name (see get_basic_info → pages). Artboards you create land on the active page.',
-  inputSchema: { project, page: z.string().min(1).describe('Page id or name') },
+  description: 'Open a page by id or name (see get_basic_info → pages); name matching is case-insensitive. Artboards you create land on the active page.',
+  inputSchema: { project, page: z.string().min(1).describe('Page id or name (name match is case-insensitive)') },
 }, forward('open_page'))
 
 server.registerTool('rename_page', {
   title: 'Rename a page',
-  description: 'Set a page’s name (by id or current name). Undoable.',
-  inputSchema: { project, page: z.string().min(1).describe('Page id or name'), name: z.string().min(1).max(60) },
+  description: 'Rename a page (by id or case-insensitive name). The hidden Design System page cannot be renamed.',
+  inputSchema: {
+    project,
+    page: z.string().min(1).describe('Page id or name (name match is case-insensitive)'),
+    name: z.string().min(1).max(60),
+  },
 }, forward('rename_page'))
 
 server.registerTool('delete_page', {
   title: 'Delete a page',
-  description: 'Remove a page and everything on it. Refuses to delete the only page. Undoable.',
-  inputSchema: { project, page: z.string().min(1).describe('Page id or name') },
+  description:
+    'Delete a page and all its contents (by id or case-insensitive name). Refuses to delete the only user page or the hidden Design System page. Undoable.',
+  inputSchema: { project, page: z.string().min(1).describe('Page id or name (name match is case-insensitive)') },
 }, forward('delete_page'))
 
 server.registerTool('set_tokens', {
@@ -315,12 +320,13 @@ server.registerTool('create_artboard', {
 server.registerTool('write_html', {
   title: 'Write HTML to the canvas',
   description:
-    'Insert or replace real HTML/CSS/Tailwind, including a sanitized SVG subset (svg/path/circle/rect/gradients — use/foreignObject/external refs are stripped). Sanitized (scripts/handlers/unsafe CSS stripped — strip reasons returned in `dropped`), parsed into the model, and rendered live. url() policy is uniform across every property (background shorthand and longhand alike): data: and asset://<id> are kept; external http(s) url() in CSS is stripped and reported. External <img src> is kept for placeholders but reported in `warnings` (the canvas then depends on the network — prefer a real asset). SVG presentation attrs using var(--token) (e.g. stroke="var(--brand)") are relocated to inline style so tokens resolve and paint. position: fixed/sticky is rejected — use absolute. Prefer several small writes over one giant one so the user sees progress. Use style="position:absolute; left/top" for free placement inside artboards, or flex containers for auto-layout.',
+    'Insert or replace real HTML/CSS/Tailwind, including a sanitized SVG subset (svg/path/circle/rect/gradients — use/foreignObject/external refs are stripped). Sanitized (scripts/handlers/unsafe CSS stripped — strip reasons returned in `dropped`), parsed into the model, and rendered live. Returns createdNodes ([{id,name,tag}], capped at 200 with truncated:true) so you can address children you just labeled with data-cz-name without a read-back. url() policy is uniform across every property (background shorthand and longhand alike): data: and asset://<id> are kept; external http(s) url() in CSS is stripped and reported. External <img src> is kept for placeholders but reported in `warnings` (prefer import_asset). SVG presentation attrs using var(--token) (e.g. stroke="var(--brand)") are relocated to inline style so tokens resolve and paint. position: fixed/sticky is rejected — use absolute. Prefer several small writes over one giant one so the user sees progress. Use style="position:absolute; left/top" for free placement inside artboards, or flex containers for auto-layout. mode "replace" on an artboard swaps the artboard\'s CONTENTS (its id/frame/name are preserved, response has contentsReplaced:true) — it does not delete the artboard.',
   inputSchema: {
     project,
     html: z.string().min(1).describe('HTML fragment. data-cz-name sets layer names.'),
     targetId: z.string().optional().describe('Container (insert into) or reference node (before/after/replace)'),
-    mode: z.enum(['insert', 'before', 'after', 'replace']).optional().describe('Default insert (append into targetId or page)'),
+    targetName: z.string().optional().describe('Alternative to targetId: unique layer name on the active page (ambiguous names error with the matching ids)'),
+    mode: z.enum(['insert', 'before', 'after', 'replace']).optional().describe('Default insert (append into target or page). replace on an artboard swaps its contents.'),
     index: z.number().int().optional().describe('Child index for insert mode'),
   },
 }, forward('write_html'))
@@ -352,7 +358,7 @@ server.registerTool('set_text_content', {
 
 server.registerTool('move_nodes', {
   title: 'Move / reparent nodes',
-  description: 'Change parent, z-order index, and/or absolute x/y position (px, relative to parent).',
+  description: 'Change parent, z-order index, and/or absolute x/y position (px, relative to parent). Edge indexes (-1, 999999) are clamped to valid range; the response echoes each node\'s final {parentId, index, clamped} placement.',
   inputSchema: {
     project,
     moves: z.array(z.object({
@@ -366,7 +372,7 @@ server.registerTool('move_nodes', {
 
 server.registerTool('duplicate_nodes', {
   title: 'Duplicate nodes',
-  description: 'Deep-copies subtrees (fresh ids), returns the new ids.',
+  description: 'Deep-copies subtrees (fresh ids), returns the new root ids plus createdNodes ([{id,name,tag}] for the whole copied subtree, capped at 200).',
   inputSchema: { project, ids: z.array(z.string()).min(1), offset: z.number().optional().describe('px offset, default 16') },
 }, forward('duplicate_nodes'))
 
@@ -488,7 +494,7 @@ server.registerTool('import_asset', {
 
 server.registerTool('undo', {
   title: 'Undo last edit',
-  description: 'Revert the most recent transaction (yours or the user’s — check the log via finish first if unsure).',
+  description: 'Revert the most recent transaction (yours or the user’s — check the log via finish first if unsure). Returns {ok, label, changedIds} of what was reverted. Mirror with redo.',
   inputSchema: { project },
 }, forward('undo'))
 
@@ -562,6 +568,51 @@ server.registerTool('unlink_artboards', {
     toId: z.string().optional().describe('Destination node id (with fromId)'),
   },
 }, forward('unlink_artboards'))
+
+server.registerTool('find_nodes', {
+  title: 'Find nodes',
+  description:
+    'Search the active page (or a rootId subtree) for nodes by name/text substring (query, case-insensitive), exact layer name, and/or tag. Returns compact summaries — use this instead of walking get_tree_summary to look something up.',
+  inputSchema: {
+    project,
+    query: z.string().optional().describe('Case-insensitive substring matched against layer name and text'),
+    name: z.string().optional().describe('Exact layer name match'),
+    tag: z.string().optional().describe('HTML tag filter, e.g. "button"'),
+    rootId: z.string().optional().describe('Limit the search to this subtree (default: active page)'),
+    limit: z.number().int().min(1).max(50).optional().describe('Max matches, default 20'),
+  },
+}, forward('find_nodes'))
+
+server.registerTool('redo', {
+  title: 'Redo last undone edit',
+  description: 'Re-apply the most recently undone transaction. Returns {ok, label, changedIds}. The redo stack is cleared by any new edit.',
+  inputSchema: { project },
+}, forward('redo'))
+
+server.registerTool('duplicate_page', {
+  title: 'Duplicate a page',
+  description:
+    'Deep-copy a page (by id or case-insensitive name): all top-level trees get fresh ids, layout is preserved, the copy is appended right after the source and becomes active. Component instances stay linked to the same components. Undo removes the copy cleanly.',
+  inputSchema: {
+    project,
+    page: z.string().min(1).describe('Source page id or name (name match is case-insensitive)'),
+    name: z.string().max(60).optional().describe('Name for the copy; default "<source> copy"'),
+  },
+}, forward('duplicate_page'))
+
+server.registerTool('create_artboard_with_html', {
+  title: 'Create an artboard with HTML',
+  description:
+    'One-call screen bootstrap: create a named artboard and fill it with parsed HTML in a single undoable transaction. Returns {artboardId, createdNodes, dropped, warnings?}. Prefer this over create_artboard + write_html for "prototype a screen from scratch".',
+  inputSchema: {
+    project,
+    html: z.string().min(1).describe('HTML fragment for the artboard contents. data-cz-name sets layer names.'),
+    name: z.string().optional().describe('Artboard name, default "Frame"'),
+    x: z.number().optional(), y: z.number().optional(),
+    width: z.number().min(1).optional().describe('Default 375'),
+    height: z.number().min(1).optional().describe('Default 667'),
+  },
+}, forward('create_artboard_with_html'))
 
 export const Route = createFileRoute('/mcp')({
   server: {

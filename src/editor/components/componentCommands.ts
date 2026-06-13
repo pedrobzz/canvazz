@@ -1,4 +1,5 @@
 import { genId } from '../model/ids'
+import { DESIGN_SYSTEM_PAGE_ID } from '../model/doc'
 import {
   COMPONENT_SET_PAD, COMPONENT_SET_PAD_TOP, canonicalSourceId, componentSetStyle,
   parsePathId, resolveNode,
@@ -26,9 +27,6 @@ interface Ctx {
 }
 
 const src = (ctx: Ctx) => ctx.source ?? 'user'
-
-/** All main components live on this dedicated, freely editable page. */
-export const DESIGN_SYSTEM_PAGE_ID = 'page_design_system'
 
 /**
  * Create a main component: the subtree MOVES to the Design System page

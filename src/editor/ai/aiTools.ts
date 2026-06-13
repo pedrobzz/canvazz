@@ -7,7 +7,8 @@ import { parseHtml, sanitizeStyle } from '../compiler/parse'
 import { sanitizeClasses } from '../compiler/allowlist'
 import { cssValuePolicyReject, isAllowedCssProp } from '../compiler/allowlist'
 import {
-  deleteNodes, duplicateNodes, insertHtml, locate, renameNode, setTextContent,
+  deletePage, deleteNodes, duplicateNodes, duplicatePage, insertHtml, locate,
+  renameNode, renamePage, setTextContent,
 } from '../commands'
 import {
   createInstance, createMainComponent, createVariant, deleteComponent,
@@ -104,6 +105,19 @@ function treeSummary(id: NodeId, depth: number, maxDepth: number): string[] {
   return [line, ...node.children.flatMap((c) => treeSummary(c, depth + 1, maxDepth))]
 }
 
+/** Resolve a page reference (id, else case-insensitive name) to a page model. */
+function resolvePage(ref: string) {
+  const trimmed = ref.trim()
+  const page = store.doc.pages.find((p) => p.id === trimmed)
+    ?? store.doc.pages.find((p) => p.name.toLowerCase() === trimmed.toLowerCase())
+  if (!page) {
+    throw new Error(
+      `Unknown page: ${ref}. Pages: ${store.doc.pages.map((p) => `${p.name} (${p.id})`).join(', ')}`,
+    )
+  }
+  return page
+}
+
 /** Resolve "insert into X" to a NodeLocation. */
 function locationFor(parentId: string | undefined, index?: number): NodeLocation {
   if (parentId) {
@@ -112,6 +126,62 @@ function locationFor(parentId: string | undefined, index?: number): NodeLocation
   }
   const page = store.activePage()
   return { kind: 'page', pageId: page.id, index: index ?? page.children.length }
+}
+
+/** Max created-node summaries returned by a write; beyond this we set truncated. */
+const CREATED_NODES_CAP = 200
+
+/**
+ * Compact {id, name, tag} list of nodes just created, in document order, so the
+ * model can address children it labeled without a read-back. Capped; the
+ * `truncated` flag signals more nodes exist than were listed.
+ */
+function createdNodesFrom(nodes: NodeModel[]): { createdNodes: Json[]; truncated?: boolean } {
+  const list = nodes.map((n) => ({ id: n.id, name: n.name, tag: n.tag }))
+  if (list.length <= CREATED_NODES_CAP) return { createdNodes: list }
+  return { createdNodes: list.slice(0, CREATED_NODES_CAP), truncated: true }
+}
+
+/** Every node id in a subtree, rooted at id (id first), in document order. */
+function subtreeIds(id: NodeId): NodeId[] {
+  const node = store.doc.nodes[id]
+  if (!node) return []
+  return [id, ...node.children.flatMap(subtreeIds)]
+}
+
+/** Top-level node ids of the active page (or a rootId subtree) to search. */
+function searchScope(rootId?: string): NodeId[] {
+  if (rootId) {
+    requireNode(rootId)
+    return [rootId]
+  }
+  return store.activePage().children
+}
+
+/**
+ * Resolve a node by id (preferred) or by unique layer name within the active
+ * page. Ambiguous names throw with the matching ids so the caller can pick one.
+ */
+function resolveTargetRef(targetId?: string, targetName?: string): NodeId {
+  if (targetId) {
+    requireNode(targetId)
+    return targetId
+  }
+  const name = (targetName ?? '').trim()
+  if (!name) throw new Error('Provide targetId or targetName.')
+  const matches: NodeId[] = []
+  for (const root of store.activePage().children) {
+    for (const nid of subtreeIds(root)) {
+      if (store.doc.nodes[nid]?.name === name) matches.push(nid)
+    }
+  }
+  if (matches.length === 0) {
+    throw new Error(`No node named "${name}" on the active page. Use find_nodes to search.`)
+  }
+  if (matches.length > 1) {
+    throw new Error(`Ambiguous targetName "${name}" — matches ${matches.join(', ')}. Use targetId.`)
+  }
+  return matches[0]
 }
 
 export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Json> = {
@@ -307,17 +377,47 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     const html = String(args.html ?? '')
     if (!html.trim()) throw new Error('html is required')
     const mode = (args.mode as string | undefined) ?? 'insert'
-    const targetId = args.targetId as string | undefined
+    const targetName = args.targetName as string | undefined
+    // Name addressing: resolve a unique layer name on the active page to an id.
+    const targetId = (args.targetId as string | undefined)
+      ?? (targetName ? resolveTargetRef(undefined, targetName) : undefined)
 
     if (mode === 'replace' && targetId) {
       const target = requireNode(targetId)
       const at = locate(store, targetId)
       if (!at) throw new Error(`Node ${targetId} has no location`)
-      // One transaction: remove old, insert new at the same place.
-      const { nodes, rootIds, dropped } = parseHtml(html, {
-        isIdTaken: (pid) => Boolean(store.doc.nodes[pid]),
-      })
+      const parsed = parseHtml(html, { isIdTaken: (pid) => Boolean(store.doc.nodes[pid]) })
+      const { nodes, rootIds, dropped } = parsed
+      const warnings = (parsed as { warnings?: string[] }).warnings
       if (rootIds.length === 0) throw new Error(`Nothing valid to insert. Dropped: ${dropped.join(', ')}`)
+
+      if (target.isArtboard) {
+        // Replacing an artboard means "swap this screen's contents" — keep the
+        // artboard node (id, frame, name, isArtboard); only its children change.
+        // Removing the artboard itself broke get_basic_info/get_screenshot.
+        const ops: Op[] = (target.children ?? []).map((cid) => ({ t: 'remove', id: cid }) as Op)
+        rootIds.forEach((rootId, i) => {
+          ops.push({
+            t: 'insertTree',
+            nodes: collectFrom(nodes, rootId),
+            rootId,
+            at: { kind: 'node', parent: targetId, index: i },
+          })
+        })
+        store.apply('AI: replace artboard contents', ops, 'ai')
+        store.setSelection([targetId])
+        const created = createdNodesFrom(nodes)
+        return {
+          ...mutationResult('write_html replace', [targetId, ...rootIds]),
+          ...created,
+          contentsReplaced: true,
+          artboardId: targetId,
+          dropped,
+          hint: 'Artboard preserved (id/frame/name); only its contents were replaced.',
+          ...(warnings?.length ? { warnings } : {}),
+        }
+      }
+
       // Preserve placement of the replaced node when the new root has none.
       const newRoot = nodes.find((n) => n.id === rootIds[0])
       if (newRoot && !newRoot.style.position && target.style.position === 'absolute') {
@@ -339,24 +439,34 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       })
       store.apply('AI: replace node', ops, 'ai')
       store.setSelection(rootIds)
-      return { ...mutationResult('write_html replace', rootIds), dropped }
+      return {
+        ...mutationResult('write_html replace', rootIds),
+        ...createdNodesFrom(nodes),
+        dropped,
+        ...(warnings?.length ? { warnings } : {}),
+      }
     }
 
     let at: NodeLocation
     if (mode === 'before' || mode === 'after') {
-      if (!targetId) throw new Error(`mode "${mode}" requires targetId`)
+      if (!targetId) throw new Error(`mode "${mode}" requires targetId or targetName`)
       const loc = locate(store, targetId)
       if (!loc) throw new Error(`Node ${targetId} has no location`)
       at = { ...loc, index: mode === 'after' ? loc.index + 1 : loc.index }
     } else {
       at = locationFor(targetId, args.index as number | undefined)
     }
-    const { rootIds, dropped } = insertHtml({ ...AI }, html, at, 'AI: write html')
+    const { rootIds, dropped, nodes, warnings } = insertHtml({ ...AI }, html, at, 'AI: write html')
     if (rootIds.length === 0) {
       throw new Error(`Nothing valid to insert. Dropped: ${dropped.join(', ') || 'everything (malformed HTML?)'}`)
     }
     store.setSelection(rootIds)
-    return { ...mutationResult('write_html', rootIds), dropped }
+    return {
+      ...mutationResult('write_html', rootIds),
+      ...createdNodesFrom(nodes),
+      dropped,
+      ...(warnings?.length ? { warnings } : {}),
+    }
   },
 
   update_styles(args) {
@@ -435,6 +545,8 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     const moves = args.moves as Array<{ id: string; parentId?: string; index?: number; x?: number; y?: number }>
     if (!Array.isArray(moves) || moves.length === 0) throw new Error('moves[] is required')
     const ops: Op[] = []
+    // Requested target index per reparented/reordered node, to detect clamping.
+    const requested = new Map<NodeId, number>()
     for (const m of moves) {
       requireNode(m.id)
       if (m.parentId !== undefined || m.index !== undefined) {
@@ -444,6 +556,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
           : m.index !== undefined && cur
             ? { ...cur, index: m.index }
             : locationFor(undefined, m.index)
+        if (m.index !== undefined) requested.set(m.id, m.index)
         ops.push({ t: 'move', id: m.id, to })
       }
       const set: Record<string, string> = {}
@@ -455,14 +568,29 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       }
     }
     const tx = store.apply('AI: move nodes', ops, 'ai')
-    return mutationResult('move_nodes', tx?.changed ?? [])
+    // Echo where each node actually landed after the model clamped edge indexes.
+    const placements = moves.map((m) => {
+      const node = store.doc.nodes[m.id]
+      const loc = node ? locate(store, m.id) : null
+      const index = loc?.index ?? -1
+      const want = requested.get(m.id)
+      return {
+        id: m.id,
+        parentId: node?.parent ?? null,
+        index,
+        clamped: want !== undefined && want !== index,
+      }
+    })
+    return { ...mutationResult('move_nodes', tx?.changed ?? []), placements }
   },
 
   duplicate_nodes(args) {
     const ids = args.ids as string[]
     ids.forEach(requireNode)
     const newIds = duplicateNodes({ ...AI }, ids, (args.offset as number | undefined) ?? 16)
-    return mutationResult('duplicate_nodes', newIds)
+    // Full created subtree so the model can address copied children by id.
+    const created = createdNodesFrom(newIds.flatMap(subtreeIds).map((nid) => store.doc.nodes[nid]).filter(Boolean))
+    return { ...mutationResult('duplicate_nodes', newIds), ...created }
   },
 
   delete_nodes(args) {
@@ -538,7 +666,12 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       y: (args.y as number | undefined) ?? 0,
     })
     if (!instanceId) throw new Error('Failed to create instance')
-    return { ...mutationResult('create_instance', [instanceId]), instanceId }
+    const inst = store.doc.nodes[instanceId]
+    return {
+      ...mutationResult('create_instance', [instanceId]),
+      instanceId,
+      ...createdNodesFrom(inst ? [inst] : []),
+    }
   },
 
   detach_instance(args) {
@@ -675,38 +808,23 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   open_page(args) {
-    const ref = String(args.page ?? '')
-    const page = store.doc.pages.find((p) => p.id === ref)
-      ?? store.doc.pages.find((p) => p.name.toLowerCase() === ref.toLowerCase())
-    if (!page) {
-      throw new Error(`Unknown page: ${ref}. Pages: ${store.doc.pages.map((p) => `${p.name} (${p.id})`).join(', ')}`)
-    }
+    const page = resolvePage(String(args.page ?? ''))
     store.setActivePage(page.id)
     return { ok: true, pageId: page.id, name: page.name, topLevelCount: page.children.length }
   },
 
   rename_page(args) {
-    const ref = String(args.page ?? '')
-    const page = store.doc.pages.find((p) => p.id === ref)
-      ?? store.doc.pages.find((p) => p.name.toLowerCase() === ref.toLowerCase())
-    if (!page) throw new Error(`Unknown page: ${ref}. Pages: ${store.doc.pages.map((p) => `${p.name} (${p.id})`).join(', ')}`)
-    const name = String(args.name ?? '').trim().slice(0, 60)
-    if (!name) throw new Error('name is required')
-    store.apply(`AI: rename page ${name}`, [{ t: 'setPageName', id: page.id, name }], 'ai')
-    return { ok: true, pageId: page.id, name, undoable: true }
+    const page = resolvePage(String(args.page ?? ''))
+    const result = renamePage({ ...AI }, page.id, String(args.name ?? ''))
+    if (!result.ok) throw new Error(result.reason)
+    return { ok: true, pageId: page.id, name: result.name, undoable: true }
   },
 
   delete_page(args) {
-    const ref = String(args.page ?? '')
-    const page = store.doc.pages.find((p) => p.id === ref)
-      ?? store.doc.pages.find((p) => p.name.toLowerCase() === ref.toLowerCase())
-    if (!page) throw new Error(`Unknown page: ${ref}. Pages: ${store.doc.pages.map((p) => `${p.name} (${p.id})`).join(', ')}`)
-    if (store.doc.pages.length <= 1) throw new Error('Cannot delete the only page in the document')
-    // Empty the page (removePage refuses a non-empty page), then drop it — one transaction.
-    const ops: Op[] = page.children.map((id) => ({ t: 'remove', id }))
-    ops.push({ t: 'removePage', id: page.id })
-    store.apply(`AI: delete page ${page.name}`, ops, 'ai')
-    return { ok: true, deletedPageId: page.id, activePageId: store.doc.activePageId, undoable: true }
+    const page = resolvePage(String(args.page ?? ''))
+    const result = deletePage({ ...AI }, page.id)
+    if (!result.ok) throw new Error(result.reason)
+    return { ...result, undoable: true }
   },
 
   set_tokens(args) {
@@ -821,8 +939,9 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   undo() {
-    const ok = store.undo()
-    return { ok, message: ok ? 'Undid last transaction' : 'Nothing to undo' }
+    const reverted = store.undo()
+    if (!reverted) return { ok: false, message: 'Nothing to undo' }
+    return { ok: true, label: reverted.label, changedIds: reverted.changed }
   },
 
   finish(args) {
@@ -918,6 +1037,85 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     if (!target) throw new Error('No matching flow link (pass linkId, or fromId + toId)')
     store.apply('AI: unlink artboards', [{ t: 'removeFlow', id: target.id }], 'ai')
     return { ok: true, removed: target.id, undoable: true }
+  },
+
+  // --- Appended executors (#4, #15, #17, #20) ------------------------------
+
+  redo() {
+    const reapplied = store.redo()
+    if (!reapplied) return { ok: false, message: 'Nothing to redo' }
+    return { ok: true, label: reapplied.label, changedIds: reapplied.changed }
+  },
+
+  find_nodes(args) {
+    const query = (args.query as string | undefined)?.trim().toLowerCase()
+    const exactName = (args.name as string | undefined)?.trim()
+    const tag = (args.tag as string | undefined)?.trim().toLowerCase()
+    const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50)
+    const roots = searchScope(args.rootId as string | undefined)
+    const matches: Json[] = []
+    let scanned = 0
+    for (const root of roots) {
+      for (const nid of subtreeIds(root)) {
+        scanned++
+        const node = store.doc.nodes[nid]
+        if (!node) continue
+        if (exactName && node.name !== exactName) continue
+        if (tag && node.tag.toLowerCase() !== tag) continue
+        if (query) {
+          const hay = `${node.name}\n${node.text ?? ''}`.toLowerCase()
+          if (!hay.includes(query)) continue
+        }
+        const summary = summarize(nid)
+        if (summary) matches.push(summary)
+        if (matches.length >= limit) break
+      }
+      if (matches.length >= limit) break
+    }
+    return { matches, count: matches.length, scanned, truncated: matches.length >= limit }
+  },
+
+  duplicate_page(args) {
+    const page = resolvePage(String(args.page ?? ''))
+    const result = duplicatePage({ ...AI }, page.id, args.name as string | undefined)
+    if (!result.ok) throw new Error(result.reason)
+    return { ...result, active: true, undoable: true }
+  },
+
+  create_artboard_with_html(args) {
+    const html = String(args.html ?? '')
+    if (!html.trim()) throw new Error('html is required')
+    const name = (args.name as string | undefined) ?? 'Frame'
+    const artboard = createArtboard(name, {
+      x: (args.x as number | undefined) ?? 0,
+      y: (args.y as number | undefined) ?? 0,
+      width: (args.width as number | undefined) ?? 375,
+      height: (args.height as number | undefined) ?? 667,
+    })
+    const parsed = parseHtml(html, { isIdTaken: (pid) => Boolean(store.doc.nodes[pid]) })
+    const { nodes, rootIds, dropped } = parsed
+    const warnings = (parsed as { warnings?: string[] }).warnings
+    const page = store.activePage()
+    // One transaction: create the artboard, then insert each parsed root inside.
+    const ops: Op[] = [{
+      t: 'insertTree', nodes: [artboard], rootId: artboard.id,
+      at: { kind: 'page', pageId: page.id, index: page.children.length },
+    }]
+    rootIds.forEach((rootId, i) => {
+      ops.push({
+        t: 'insertTree', nodes: collectFrom(nodes, rootId), rootId,
+        at: { kind: 'node', parent: artboard.id, index: i },
+      })
+    })
+    store.apply(`AI: create artboard ${name} with html`, ops, 'ai')
+    store.setSelection([artboard.id])
+    return {
+      ...mutationResult('create_artboard_with_html', [artboard.id, ...rootIds]),
+      artboardId: artboard.id,
+      ...createdNodesFrom(nodes),
+      dropped,
+      ...(warnings?.length ? { warnings } : {}),
+    }
   },
 }
 

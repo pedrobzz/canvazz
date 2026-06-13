@@ -147,7 +147,12 @@ const TAG_NAMES: Record<string, string> = {
   label: 'Label', figure: 'Figure', figcaption: 'Caption',
 }
 
-function defaultName(tag: string, text?: string): string {
+/**
+ * Layer name a node gets by default: derived from its text (trimmed, ≤24 chars)
+ * else a per-tag label. Exported so text edits can tell whether the current
+ * layer name was auto-derived from the old text and refresh it.
+ */
+export function defaultName(tag: string, text?: string): string {
   if (text) {
     const trimmed = text.trim().replace(/\s+/g, ' ')
     if (trimmed) return trimmed.slice(0, 24)
