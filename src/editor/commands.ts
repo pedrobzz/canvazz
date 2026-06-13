@@ -381,6 +381,40 @@ export function renamePage(
   return { ok: true, name: clean }
 }
 
+/**
+ * Deep-copy a page: clone every top-level subtree with fresh ids (reusing the
+ * duplicate machinery), preserve relative layout, append the new page right
+ * after the source, and switch to it. Instances stay linked to the same
+ * components. One undoable transaction; undo removes the page cleanly.
+ */
+export function duplicatePage(
+  ctx: CommandCtx,
+  pageId: string,
+  name?: string,
+): { ok: true; pageId: string; name: string; nodeCount: number } | PageGuardError {
+  const { store } = ctx
+  const source = store.doc.pages.find((p) => p.id === pageId)
+  if (!source) return { ok: false, reason: `Unknown page: ${pageId}` }
+  const newPageId = genId('page')
+  const newName = name?.slice(0, 60).trim() || `${source.name} copy`
+  const index = store.doc.pages.findIndex((p) => p.id === pageId) + 1
+  const ops: Op[] = [{ t: 'addPage', page: { id: newPageId, name: newName, children: [] }, index }]
+  let nodeCount = 0
+  source.children.forEach((childId, i) => {
+    const clone = cloneSubtree(store.doc.nodes, childId)
+    nodeCount += clone.nodes.length
+    ops.push({
+      t: 'insertTree',
+      nodes: clone.nodes,
+      rootId: clone.rootId,
+      at: { kind: 'page', pageId: newPageId, index: i },
+    })
+  })
+  store.apply(`Duplicate page ${source.name}`, ops, src(ctx))
+  store.setActivePage(newPageId)
+  return { ok: true, pageId: newPageId, name: newName, nodeCount }
+}
+
 // --- helpers ---------------------------------------------------------------
 
 export function locate(store: EditorStore, id: NodeId): NodeLocation | null {

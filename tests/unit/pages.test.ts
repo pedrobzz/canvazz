@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { EditorStore } from '#/editor/store/editorStore'
 import { DESIGN_SYSTEM_PAGE_ID, emptyDocument } from '#/editor/model/doc'
-import { deletePage, renamePage } from '#/editor/commands'
+import { deletePage, duplicatePage, renamePage } from '#/editor/commands'
 import { createArtboard } from '#/editor/model/factory'
 import type { DocumentModel, NodeModel } from '#/editor/model/types'
 
@@ -85,5 +85,53 @@ describe('renamePage guard', () => {
     const result = renamePage({ store, source: 'ai' }, DESIGN_SYSTEM_PAGE_ID, 'Hacked')
     expect(result.ok).toBe(false)
     expect(store.doc.pages.find((p) => p.id === DESIGN_SYSTEM_PAGE_ID)?.name).toBe('Design System')
+  })
+})
+
+describe('duplicatePage', () => {
+  it('deep-copies trees with fresh ids, appends after source, and switches to it', () => {
+    const store = new EditorStore(docWithDesignSystem())
+    const result = duplicatePage({ store, source: 'ai' }, 'page_1', 'Home copy')
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const idx = store.doc.pages.findIndex((p) => p.id === result.pageId)
+    expect(idx).toBe(1)
+    expect(store.doc.activePageId).toBe(result.pageId)
+    const newPage = store.doc.pages[idx]
+    expect(newPage.children).toHaveLength(1)
+    const newRoot = newPage.children[0]
+    expect(newRoot).not.toBe('artboard-1')
+    expect(store.doc.nodes[newRoot].isArtboard).toBe(true)
+    expect(store.doc.nodes[newRoot].children).toHaveLength(1)
+    const newChild = store.doc.nodes[newRoot].children[0]
+    expect(newChild).not.toBe('child-1')
+    expect(store.doc.nodes[newChild].name).toBe('Card')
+    expect(result.nodeCount).toBe(2)
+  })
+
+  it('keeps component instances linked to the same component', () => {
+    const store = new EditorStore(docWithDesignSystem())
+    const inst: NodeModel = {
+      id: 'inst-1', name: 'Btn', tag: 'div', attrs: {}, style: {}, classes: [],
+      children: [], parent: null, visible: true, locked: false, componentId: 'cmp-1',
+    }
+    store.apply('add inst', [{ t: 'insertTree', nodes: [inst], rootId: inst.id, at: { kind: 'page', pageId: 'page_1', index: 1 } }], 'user')
+    const result = duplicatePage({ store, source: 'ai' }, 'page_1')
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const newPage = store.doc.pages.find((p) => p.id === result.pageId)!
+    const clonedInst = newPage.children.map((id) => store.doc.nodes[id]).find((n) => n.componentId)
+    expect(clonedInst?.componentId).toBe('cmp-1')
+    expect(clonedInst?.id).not.toBe('inst-1')
+  })
+
+  it('undo removes the duplicated page cleanly', () => {
+    const store = new EditorStore(docWithDesignSystem())
+    const before = store.doc.pages.length
+    const result = duplicatePage({ store, source: 'ai' }, 'page_1')
+    expect(store.doc.pages.length).toBe(before + 1)
+    store.undo()
+    expect(store.doc.pages.length).toBe(before)
+    if (result.ok) expect(store.doc.pages.some((p) => p.id === result.pageId)).toBe(false)
   })
 })

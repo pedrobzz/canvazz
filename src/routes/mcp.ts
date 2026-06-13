@@ -456,6 +456,51 @@ server.registerTool('finish', {
   inputSchema: { project, summary: z.string().optional() },
 }, forward('finish'))
 
+server.registerTool('find_nodes', {
+  title: 'Find nodes',
+  description:
+    'Search the active page (or a rootId subtree) for nodes by name/text substring (query, case-insensitive), exact layer name, and/or tag. Returns compact summaries — use this instead of walking get_tree_summary to look something up.',
+  inputSchema: {
+    project,
+    query: z.string().optional().describe('Case-insensitive substring matched against layer name and text'),
+    name: z.string().optional().describe('Exact layer name match'),
+    tag: z.string().optional().describe('HTML tag filter, e.g. "button"'),
+    rootId: z.string().optional().describe('Limit the search to this subtree (default: active page)'),
+    limit: z.number().int().min(1).max(50).optional().describe('Max matches, default 20'),
+  },
+}, forward('find_nodes'))
+
+server.registerTool('redo', {
+  title: 'Redo last undone edit',
+  description: 'Re-apply the most recently undone transaction. Returns {ok, label, changedIds}. The redo stack is cleared by any new edit.',
+  inputSchema: { project },
+}, forward('redo'))
+
+server.registerTool('duplicate_page', {
+  title: 'Duplicate a page',
+  description:
+    'Deep-copy a page (by id or case-insensitive name): all top-level trees get fresh ids, layout is preserved, the copy is appended right after the source and becomes active. Component instances stay linked to the same components. Undo removes the copy cleanly.',
+  inputSchema: {
+    project,
+    page: z.string().min(1).describe('Source page id or name (name match is case-insensitive)'),
+    name: z.string().max(60).optional().describe('Name for the copy; default "<source> copy"'),
+  },
+}, forward('duplicate_page'))
+
+server.registerTool('create_artboard_with_html', {
+  title: 'Create an artboard with HTML',
+  description:
+    'One-call screen bootstrap: create a named artboard and fill it with parsed HTML in a single undoable transaction. Returns {artboardId, createdNodes, dropped, warnings?}. Prefer this over create_artboard + write_html for "prototype a screen from scratch".',
+  inputSchema: {
+    project,
+    html: z.string().min(1).describe('HTML fragment for the artboard contents. data-cz-name sets layer names.'),
+    name: z.string().optional().describe('Artboard name, default "Frame"'),
+    x: z.number().optional(), y: z.number().optional(),
+    width: z.number().min(1).optional().describe('Default 375'),
+    height: z.number().min(1).optional().describe('Default 667'),
+  },
+}, forward('create_artboard_with_html'))
+
 export const Route = createFileRoute('/mcp')({
   server: {
     handlers: {

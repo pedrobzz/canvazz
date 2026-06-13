@@ -6,7 +6,7 @@ import { exportHtml, exportJsx } from '../compiler/export'
 import { parseHtml, sanitizeStyle } from '../compiler/parse'
 import { sanitizeClasses } from '../compiler/allowlist'
 import {
-  deletePage, deleteNodes, duplicateNodes, insertHtml, locate,
+  deletePage, deleteNodes, duplicateNodes, duplicatePage, insertHtml, locate,
   renameNode, renamePage, setTextContent,
 } from '../commands'
 import {
@@ -760,6 +760,83 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       summary: String(args.summary ?? ''),
       log: store.log.slice(-20),
       nodeCount: Object.keys(store.doc.nodes).length,
+    }
+  },
+
+  redo() {
+    const reapplied = store.redo()
+    if (!reapplied) return { ok: false, message: 'Nothing to redo' }
+    return { ok: true, label: reapplied.label, changedIds: reapplied.changed }
+  },
+
+  find_nodes(args) {
+    const query = (args.query as string | undefined)?.trim().toLowerCase()
+    const exactName = (args.name as string | undefined)?.trim()
+    const tag = (args.tag as string | undefined)?.trim().toLowerCase()
+    const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50)
+    const roots = searchScope(args.rootId as string | undefined)
+    const matches: Json[] = []
+    let scanned = 0
+    for (const root of roots) {
+      for (const nid of subtreeIds(root)) {
+        scanned++
+        const node = store.doc.nodes[nid]
+        if (!node) continue
+        if (exactName && node.name !== exactName) continue
+        if (tag && node.tag.toLowerCase() !== tag) continue
+        if (query) {
+          const hay = `${node.name}\n${node.text ?? ''}`.toLowerCase()
+          if (!hay.includes(query)) continue
+        }
+        const summary = summarize(nid)
+        if (summary) matches.push(summary)
+        if (matches.length >= limit) break
+      }
+      if (matches.length >= limit) break
+    }
+    return { matches, count: matches.length, scanned, truncated: matches.length >= limit }
+  },
+
+  duplicate_page(args) {
+    const page = resolvePage(String(args.page ?? ''))
+    const result = duplicatePage({ ...AI }, page.id, args.name as string | undefined)
+    if (!result.ok) throw new Error(result.reason)
+    return { ...result, active: true, undoable: true }
+  },
+
+  create_artboard_with_html(args) {
+    const html = String(args.html ?? '')
+    if (!html.trim()) throw new Error('html is required')
+    const name = (args.name as string | undefined) ?? 'Frame'
+    const artboard = createArtboard(name, {
+      x: (args.x as number | undefined) ?? 0,
+      y: (args.y as number | undefined) ?? 0,
+      width: (args.width as number | undefined) ?? 375,
+      height: (args.height as number | undefined) ?? 667,
+    })
+    const parsed = parseHtml(html, { isIdTaken: (pid) => Boolean(store.doc.nodes[pid]) })
+    const { nodes, rootIds, dropped } = parsed
+    const warnings = (parsed as { warnings?: string[] }).warnings
+    const page = store.activePage()
+    // One transaction: create the artboard, then insert each parsed root inside.
+    const ops: Op[] = [{
+      t: 'insertTree', nodes: [artboard], rootId: artboard.id,
+      at: { kind: 'page', pageId: page.id, index: page.children.length },
+    }]
+    rootIds.forEach((rootId, i) => {
+      ops.push({
+        t: 'insertTree', nodes: collectFrom(nodes, rootId), rootId,
+        at: { kind: 'node', parent: artboard.id, index: i },
+      })
+    })
+    store.apply(`AI: create artboard ${name} with html`, ops, 'ai')
+    store.setSelection([artboard.id])
+    return {
+      ...mutationResult('create_artboard_with_html', [artboard.id, ...rootIds]),
+      artboardId: artboard.id,
+      ...createdNodesFrom(nodes),
+      dropped,
+      ...(warnings?.length ? { warnings } : {}),
     }
   },
 }
