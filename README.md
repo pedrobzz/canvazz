@@ -74,6 +74,9 @@ document (debounced) through the same server functions.
   dangerous CSS at every input boundary — and reports *why*.
 - **Real components & design system.** Main components, variants, instance overrides, color
   tokens, Google Fonts, and all 7,007 Apple SF Symbols, first-class.
+- **Comments as a conversation.** Pin threads to a node or a dragged area; the user and the MCP
+  agent reply in the same thread — the agent reads open comments, does the task, and replies
+  with a short confirmation (or asks a question when it's blocked).
 
 ## Requirements
 
@@ -254,6 +257,22 @@ preserving placement and color (the symbol identity round-trips via `data-cz-ico
 **Fonts** are document assets: add a Google family in Assets ▸ Fonts (or via MCP `add_font`)
 and it loads as a stylesheet, shows in the typography inspector, and persists with the file.
 
+### Comments & threads
+
+Comments are a back-and-forth between you and the agent about the design, not just one-off
+notes. Pick the **Comment** tool (`C`) and either click a node (hover highlights what you'll
+attach to — no double-click) or drag a rectangle to make an **area comment** attached to every
+node inside it. Each comment is a thread: reply, edit your latest message, **resolve** to close
+it, or reopen it with a new reply. Pins live on the canvas (hover for a preview, click to open);
+the left panel's **Comments** tab lists every thread split into Open and Resolved and flies you
+to any of them.
+
+The MCP agent is a first-class participant: it reads open threads with `list_comments` /
+`get_comment` (which include the attached nodes so it knows what you're talking about), and
+`reply_comment` posts its answer — auto-resolving when the work is done, or replying without
+resolving when it needs more context or the request isn't possible. Comments persist with the
+document but live outside the undo stack, so a reply or resolve is never an accidental `⌘Z`.
+
 ### MCP contract (Paper-style)
 
 Pick a project → context first → incremental visible writes → exact reads → targeted edits →
@@ -272,6 +291,9 @@ explicit finish. Every canvas tool requires `project` (id or unique name):
   override keys), `create_instance` (auto-layout-aware), `create_variant` (returns a
   base→clone id map), `set_instance_overrides`, `detach_instance`, `delete_component`,
   `set_visibility`.
+- **Comments:** `list_comments` (open threads, with attached nodes + last message),
+  `get_comment` (full thread + attached-node tree), `reply_comment` (agent reply, auto-resolves
+  by default; `resolve:false` to answer a question or flag a blocker without closing).
 - **Workflow:** `select_nodes`, `export` (html/jsx), `undo`, `finish`.
 
 Every mutation is schema-validated (zod), transactional, undoable, and returns changed ids
