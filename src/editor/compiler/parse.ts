@@ -93,10 +93,12 @@ export function sanitizeStyle(
       dropped?.push(`css:${prop}`)
       continue
     }
-    // Layout-model policy (position: fixed/sticky) — reject with a clear reason
-    // so it never silently applies.
-    if (cssValuePolicyReject(prop, rawValue)) {
-      dropped?.push(`css:${prop} (disallowed value)`)
+    // Layout-model policy (position: fixed/sticky) — reject with the specific,
+    // actionable reason ("use absolute") so it never silently flattens to static
+    // with no guidance.
+    const policy = cssValuePolicyReject(prop, rawValue)
+    if (policy) {
+      dropped?.push(`css:${prop} (${policy})`)
       continue
     }
     // One url() policy for every url-bearing declaration (shorthand and
