@@ -633,6 +633,44 @@ server.registerTool('create_artboard_with_html', {
   },
 }, forward('create_artboard_with_html'))
 
+// --- Comments ---------------------------------------------------------------
+
+const commentRef = {
+  commentId: z.string().optional().describe('Comment thread id (from list_comments)'),
+  id: z.string().optional().describe('Alias of commentId'),
+  threadId: z.string().optional().describe('Alias of commentId'),
+}
+
+server.registerTool('list_comments', {
+  title: 'List comment threads',
+  description:
+    'Read the user’s comment threads pinned on the canvas. Returns each thread’s anchor, the nodes it is attached to (live summaries), the last message, and resolved state. Defaults to UNRESOLVED threads only — these are the open conversations and requests waiting on you. Pass includeResolved:true for the full history. Treat comments as a conversation, not always a change request: a thread may be a question to answer. After reading, act and/or reply_comment.',
+  inputSchema: {
+    project,
+    includeResolved: z.boolean().optional().describe('Include resolved threads too (default false — open only)'),
+    page: z.string().optional().describe('Limit to one page (id or case-insensitive name); default all pages'),
+  },
+}, forward('list_comments'))
+
+server.registerTool('get_comment', {
+  title: 'Get one comment thread',
+  description:
+    'Full detail of a single thread: every message in order (with author user/agent and timestamps), the attached nodes’ summaries, and an indented tree of those nodes so you can see exactly what the comment is about before acting or replying.',
+  inputSchema: { project, ...commentRef },
+}, forward('get_comment'))
+
+server.registerTool('reply_comment', {
+  title: 'Reply to a comment thread',
+  description:
+    'Append your reply (author: agent) to a thread. AUTO-RESOLVES by default (resolve:true) — use this when you have done the task or answered the question; keep the reply short ("Done — increased the title to 28px."). Pass resolve:false to reply WITHOUT resolving when you are blocked or need more context (missing info, impossible request, a clarifying question) — that keeps the thread open (reopening it if it was resolved) so the user can respond.',
+  inputSchema: {
+    project,
+    ...commentRef,
+    body: z.string().min(1).describe('Your reply text'),
+    resolve: z.boolean().optional().describe('Resolve the thread after replying (default true)'),
+  },
+}, forward('reply_comment'))
+
 export const Route = createFileRoute('/mcp')({
   server: {
     handlers: {
