@@ -118,6 +118,20 @@ export interface CommentModel {
   resolved: boolean
 }
 
+/**
+ * A prototype flow link between two nodes (usually artboards): "this card,
+ * when tapped, opens the Detail screen". Model-only — canvas arrow rendering
+ * is a later, optional concern. Links are removed when either endpoint node
+ * is deleted, so the collection stays consistent.
+ */
+export interface FlowLink {
+  id: string
+  fromId: NodeId
+  toId: NodeId
+  trigger: 'tap' | 'hover'
+  label?: string
+}
+
 export interface DocumentModel {
   id: string
   name: string
@@ -133,6 +147,8 @@ export interface DocumentModel {
   fonts: Record<string, FontModel>
   assets: Record<string, AssetModel>
   comments: CommentModel[]
+  /** Prototype flow links between nodes. Optional for back-compat. */
+  flows?: FlowLink[]
 }
 
 /** Where a node lives: under another node, or at the top level of a page. */
@@ -164,6 +180,8 @@ export type Op =
   | { t: 'addAsset'; asset: AssetModel }
   | { t: 'addComment'; comment: CommentModel }
   | { t: 'setComment'; id: string; patch: Partial<Pick<CommentModel, 'body' | 'resolved'>> }
+  | { t: 'setFlow'; flow: FlowLink }
+  | { t: 'removeFlow'; id: string }
 
 export interface NodePropsPatch {
   name?: string
