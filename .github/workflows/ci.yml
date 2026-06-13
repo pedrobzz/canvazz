@@ -14,6 +14,10 @@ concurrency:
 jobs:
   quality:
     name: Typecheck, unit, changeset
+    # Skip the bot's "Version Packages" PR: it only bumps package.json +
+    # CHANGELOG (consuming changesets), with no code to test. A skipped required
+    # check is treated as passing, so the PR stays mergeable without re-running.
+    if: github.head_ref != 'changeset-release/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,14 +34,15 @@ jobs:
       - name: Require a changeset
         # Fails if the PR changes the package without declaring a version bump.
         # No release needed? add an empty one: `bun run changeset -- --empty`.
-        # Skipped for the bot's "Version Packages" PR, which consumes changesets.
-        if: github.head_ref != 'changeset-release/main'
         run: |
           git fetch origin "${{ github.base_ref }}" --depth=1
           bunx changeset status --since=origin/${{ github.base_ref }}
 
   e2e:
     name: Playwright e2e (darwin-arm64)
+    # Same as quality: the Version Packages PR has no code — skip the (macOS)
+    # e2e run entirely instead of re-CIing a version/changelog bump.
+    if: github.head_ref != 'changeset-release/main'
     # Visual snapshots are committed from macOS/arm64 — match that here so
     # font rendering lines up. This is also the only released platform.
     runs-on: macos-14
