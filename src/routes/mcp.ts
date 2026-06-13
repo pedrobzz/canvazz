@@ -294,12 +294,13 @@ server.registerTool('create_artboard', {
 server.registerTool('write_html', {
   title: 'Write HTML to the canvas',
   description:
-    'Insert or replace real HTML/CSS/Tailwind, including a sanitized SVG subset (svg/path/circle/rect/gradients — use/foreignObject/external refs are stripped). Sanitized (scripts/handlers/unsafe CSS stripped — strip reasons returned), parsed into the model, and rendered live. Prefer several small writes over one giant one so the user sees progress. Use style="position:absolute; left/top" for free placement inside artboards, or flex containers for auto-layout.',
+    'Insert or replace real HTML/CSS/Tailwind, including a sanitized SVG subset (svg/path/circle/rect/gradients — use/foreignObject/external refs are stripped). Sanitized (scripts/handlers/unsafe CSS stripped — strip reasons returned), parsed into the model, and rendered live. Returns createdNodes ([{id,name,tag}], capped at 200 with truncated:true) so you can address children you just labeled with data-cz-name without a read-back. Prefer several small writes over one giant one so the user sees progress. Use style="position:absolute; left/top" for free placement inside artboards, or flex containers for auto-layout. mode "replace" on an artboard swaps the artboard\'s CONTENTS (its id/frame/name are preserved, response has contentsReplaced:true) — it does not delete the artboard.',
   inputSchema: {
     project,
     html: z.string().min(1).describe('HTML fragment. data-cz-name sets layer names.'),
     targetId: z.string().optional().describe('Container (insert into) or reference node (before/after/replace)'),
-    mode: z.enum(['insert', 'before', 'after', 'replace']).optional().describe('Default insert (append into targetId or page)'),
+    targetName: z.string().optional().describe('Alternative to targetId: unique layer name on the active page (ambiguous names error with the matching ids)'),
+    mode: z.enum(['insert', 'before', 'after', 'replace']).optional().describe('Default insert (append into target or page). replace on an artboard swaps its contents.'),
     index: z.number().int().optional().describe('Child index for insert mode'),
   },
 }, forward('write_html'))
@@ -331,7 +332,7 @@ server.registerTool('set_text_content', {
 
 server.registerTool('move_nodes', {
   title: 'Move / reparent nodes',
-  description: 'Change parent, z-order index, and/or absolute x/y position (px, relative to parent).',
+  description: 'Change parent, z-order index, and/or absolute x/y position (px, relative to parent). Edge indexes (-1, 999999) are clamped to valid range; the response echoes each node\'s final {parentId, index, clamped} placement.',
   inputSchema: {
     project,
     moves: z.array(z.object({
@@ -345,7 +346,7 @@ server.registerTool('move_nodes', {
 
 server.registerTool('duplicate_nodes', {
   title: 'Duplicate nodes',
-  description: 'Deep-copies subtrees (fresh ids), returns the new ids.',
+  description: 'Deep-copies subtrees (fresh ids), returns the new root ids plus createdNodes ([{id,name,tag}] for the whole copied subtree, capped at 200).',
   inputSchema: { project, ids: z.array(z.string()).min(1), offset: z.number().optional().describe('px offset, default 16') },
 }, forward('duplicate_nodes'))
 
@@ -444,7 +445,7 @@ server.registerTool('export', {
 
 server.registerTool('undo', {
   title: 'Undo last edit',
-  description: 'Revert the most recent transaction (yours or the user’s — check the log via finish first if unsure).',
+  description: 'Revert the most recent transaction (yours or the user’s — check the log via finish first if unsure). Returns {ok, label, changedIds} of what was reverted. Mirror with redo.',
   inputSchema: { project },
 }, forward('undo'))
 

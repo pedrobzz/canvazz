@@ -2,12 +2,12 @@ import { collectSubtree, DESIGN_SYSTEM_PAGE_ID } from './model/doc'
 import { cloneSubtree } from './model/factory'
 import { genId } from './model/ids'
 import { exportHtml } from './compiler/export'
-import { parseHtml } from './compiler/parse'
+import { defaultName, parseHtml } from './compiler/parse'
 import { SVG_TAGS } from './compiler/allowlist'
 import { px, fmtPx } from './canvas/geometry'
 import type { Rect } from './canvas/geometry'
 import type { EditorStore } from './store/editorStore'
-import type { NodeId, NodeLocation, NodeModel, Op, TransactionSource } from './model/types'
+import type { NodeId, NodeLocation, NodeModel, NodePropsPatch, Op, TransactionSource } from './model/types'
 
 /**
  * Shared editing commands over the store. Both human input (keyboard,
@@ -180,19 +180,30 @@ export function setTextContent(ctx: CommandCtx, id: NodeId, text: string) {
   const { store } = ctx
   const node = store.doc.nodes[id]
   if (!node) return
+  const patch: NodePropsPatch = { text }
+  // If the layer name was auto-derived from the old text (never hand-named),
+  // refresh it from the new text so the tree doesn't show stale labels.
+  const oldText = node.text ?? ''
+  if (node.name === defaultName(node.tag, oldText)) {
+    patch.name = defaultName(node.tag, text)
+  }
   if (node.children.length > 0) {
     // Editing flattened rich text: replace children with the plain string.
     const ops: Op[] = node.children.map((c) => ({ t: 'remove', id: c }) as Op)
-    ops.push({ t: 'setProps', id, patch: { text } })
+    ops.push({ t: 'setProps', id, patch })
     store.apply('Edit text', ops, src(ctx))
   } else {
-    store.apply('Edit text', [{ t: 'setProps', id, patch: { text } }], src(ctx))
+    store.apply('Edit text', [{ t: 'setProps', id, patch }], src(ctx))
   }
 }
 
 export interface InsertResult {
   rootIds: NodeId[]
   dropped: string[]
+  /** Every node created by the parse, in document order. */
+  nodes: NodeModel[]
+  /** Non-fatal sanitizer warnings, when the parser reports them. */
+  warnings?: string[]
 }
 
 /** Parse untrusted HTML and insert it at a location, as one transaction. */
@@ -203,10 +214,10 @@ export function insertHtml(
   label = 'Insert',
 ): InsertResult {
   const { store } = ctx
-  const { nodes, rootIds, dropped } = parseHtml(html, {
-    isIdTaken: (id) => Boolean(store.doc.nodes[id]),
-  })
-  if (rootIds.length === 0) return { rootIds: [], dropped }
+  const result = parseHtml(html, { isIdTaken: (id) => Boolean(store.doc.nodes[id]) })
+  const { nodes, rootIds, dropped } = result
+  const warnings = (result as { warnings?: string[] }).warnings
+  if (rootIds.length === 0) return { rootIds: [], dropped, nodes, ...(warnings?.length ? { warnings } : {}) }
   const byId = new Map(nodes.map((n) => [n.id, n]))
   const collect = (id: NodeId): NodeModel[] => {
     const node = byId.get(id)
@@ -220,7 +231,7 @@ export function insertHtml(
     at: { ...at, index: at.index + i },
   }))
   store.apply(label, ops, src(ctx))
-  return { rootIds, dropped }
+  return { rootIds, dropped, nodes, ...(warnings?.length ? { warnings } : {}) }
 }
 
 /**
@@ -236,11 +247,11 @@ export function replaceNodeHtml(
   const { store } = ctx
   const target = store.doc.nodes[targetId]
   const at = locate(store, targetId)
-  if (!target || !at) return { rootIds: [], dropped: [] }
-  const { nodes, rootIds, dropped } = parseHtml(html, {
-    isIdTaken: (id) => Boolean(store.doc.nodes[id]),
-  })
-  if (rootIds.length === 0) return { rootIds: [], dropped }
+  if (!target || !at) return { rootIds: [], dropped: [], nodes: [] }
+  const result = parseHtml(html, { isIdTaken: (id) => Boolean(store.doc.nodes[id]) })
+  const { nodes, rootIds, dropped } = result
+  const warnings = (result as { warnings?: string[] }).warnings
+  if (rootIds.length === 0) return { rootIds: [], dropped, nodes, ...(warnings?.length ? { warnings } : {}) }
   const byId = new Map(nodes.map((n) => [n.id, n]))
   const collect = (id: NodeId): NodeModel[] => {
     const node = byId.get(id)
@@ -251,7 +262,7 @@ export function replaceNodeHtml(
     ops.push({ t: 'insertTree', nodes: collect(rootId), rootId, at: { ...at, index: at.index + i } })
   })
   store.apply(label, ops, src(ctx))
-  return { rootIds, dropped }
+  return { rootIds, dropped, nodes, ...(warnings?.length ? { warnings } : {}) }
 }
 
 /** Serialize nodes to sanitized HTML (the copy payload). */
