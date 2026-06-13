@@ -22,6 +22,16 @@ import { connectedProjects, dispatchToEditor } from '#/server/bridge'
 const server = new McpServer({ name: 'canvazz', version: '1.0.0' })
 
 const id = z.string().describe('Node id (from get_tree_summary / get_basic_info)')
+/**
+ * A single-node reference. The surface historically named it id/nodeId/targetId
+ * in different tools; accept all three so a near-miss is used, not silently
+ * ignored. Executors read whichever is present (see refId in aiTools).
+ */
+const nodeRef = {
+  id: id.optional(),
+  nodeId: z.string().optional().describe('Alias of id'),
+  targetId: z.string().optional().describe('Alias of id'),
+}
 const project = z
   .string()
   .describe('Project id or exact name (see list_projects). Required for every canvas tool.')
@@ -177,34 +187,34 @@ server.registerTool('get_tree_summary', {
 server.registerTool('get_children', {
   title: 'List direct children',
   description: 'Summaries of a node’s direct children, in z-order (last = front).',
-  inputSchema: { project, id },
+  inputSchema: { project, ...nodeRef },
 }, forward('get_children'))
 
 server.registerTool('get_node_info', {
   title: 'Get full node detail',
-  description: 'Full model of one node: tag, attrs, inline styles, classes, text, rect, parent/children summaries.',
-  inputSchema: { project, id },
+  description: 'Full model of one node: tag, attrs, inline styles, classes, text, rect, parent/children summaries. For an instance, also returns overridableSlots (the def sourceIds set_instance_overrides keys on).',
+  inputSchema: { project, ...nodeRef },
 }, forward('get_node_info'))
 
 server.registerTool('get_html', {
   title: 'Read node as HTML',
   description: 'Exact sanitized HTML of a subtree (instances expanded), with data-cz-id/name for stable identity.',
-  inputSchema: { project, id },
+  inputSchema: { project, ...nodeRef },
 }, forward('get_html'))
 
 server.registerTool('get_jsx', {
   title: 'Read node as JSX',
   description:
     'The subtree as React components: className, camelCase style objects and SVG attributes, real component functions for instances, and no data-cz-* (set includeIds to keep them). Compiles under the React preset.',
-  inputSchema: { project, id, includeIds: z.boolean().optional().describe('Keep data-cz-id/name for re-import (stripped by default).') },
+  inputSchema: { project, ...nodeRef, includeIds: z.boolean().optional().describe('Keep data-cz-id/name for re-import (stripped by default).') },
 }, forward('get_jsx'))
 
 server.registerTool('get_computed_styles', {
   title: 'Get computed styles',
-  description: 'Browser-computed CSS for a node (what actually renders, after Tailwind/inheritance/layout).',
+  description: 'Browser-computed CSS for a node (what actually renders, after Tailwind/inheritance/layout). SVG nodes also return fill/stroke/stroke-* paint.',
   inputSchema: {
     project,
-    id,
+    ...nodeRef,
     properties: z.array(z.string()).optional().describe('Specific CSS properties; default returns a useful set'),
   },
 }, forward('get_computed_styles'))
@@ -215,9 +225,9 @@ server.registerTool('get_screenshot', {
     'PNG of a node or the first artboard. Use to visually verify edits. Tall artboards: read them band-by-band with region (node-relative crop) at 1:1, or raise maxEdge up to 4096. Node shots composite the nearest ancestor background and warn when a gradient can only be approximated.',
   inputSchema: {
     project,
-    id: z.string().optional().describe('Node/artboard id; default first artboard'),
+    ...nodeRef,
     maxEdge: z.number().int().optional().describe('Long-edge pixel cap before downscaling; default 1200, max 4096'),
-    scale: z.number().optional().describe('Force a capture scale (clamped so the long edge stays within maxEdge)'),
+    scale: z.number().optional().describe('Capture scale; honored in both directions (>1 for hi-dpi), capped so the long edge stays within maxEdge'),
     region: z
       .object({
         x: z.number(), y: z.number(), width: z.number().optional(), height: z.number().optional(),
@@ -289,7 +299,8 @@ server.registerTool('set_tokens', {
     'Define or remove document tokens (CSS custom properties on the canvas root). Reference them anywhere as var(--name); editing a token recolors every usage instantly.',
   inputSchema: {
     project,
-    set: z.record(z.string(), z.string().nullable()).describe('e.g. {"brand": "#0A9BFF", "old-token": null}'),
+    set: z.record(z.string(), z.string().nullable()).optional().describe('e.g. {"brand": "#0A9BFF", "old-token": null} (alias: tokens)'),
+    tokens: z.record(z.string(), z.string().nullable()).optional().describe('Alias of set'),
   },
 }, forward('set_tokens'))
 
@@ -354,13 +365,13 @@ server.registerTool('update_styles', {
 server.registerTool('set_classes', {
   title: 'Set Tailwind classes',
   description: 'Replace a node’s class list (validated; dangerous tokens dropped).',
-  inputSchema: { project, id, classes: z.string().describe('Space-separated class string') },
+  inputSchema: { project, ...nodeRef, classes: z.string().describe('Space-separated class string') },
 }, forward('set_classes'))
 
 server.registerTool('set_text_content', {
   title: 'Set text content',
   description: 'Replace a node’s text. Works on headings, paragraphs, spans, buttons, etc.',
-  inputSchema: { project, id, text: z.string() },
+  inputSchema: { project, ...nodeRef, text: z.string() },
 }, forward('set_text_content'))
 
 server.registerTool('move_nodes', {
@@ -409,7 +420,7 @@ server.registerTool('rename_nodes', {
 server.registerTool('create_component', {
   title: 'Create component from node',
   description: 'Turn a subtree into a main component. Instances stay linked and update when it changes.',
-  inputSchema: { project, nodeId: z.string(), name: z.string().optional() },
+  inputSchema: { project, ...nodeRef, name: z.string().optional() },
 }, forward('create_component'))
 
 server.registerTool('create_variant', {
@@ -478,7 +489,7 @@ server.registerTool('export', {
     'Production HTML or JSX for a subtree. JSX emits real components (one function per component definition, instances as <Name/>), camelCased SVG attributes, and no data-cz-* (set includeIds to keep them for re-import). standalone wraps the HTML in a full document with Google Fonts <link>s, a :root token block, and the Tailwind runtime so the file renders on its own. Imported assets resolve to their bytes (deduped for backgrounds, inlined for <img>).',
   inputSchema: {
     project,
-    id,
+    ...nodeRef,
     format: z.enum(['html', 'jsx']).optional(),
     standalone: z.boolean().optional().describe('HTML only: wrap in a full <!doctype html> document (fonts, tokens, Tailwind) so it renders standalone.'),
     includeIds: z.boolean().optional().describe('JSX only: keep data-cz-id/name for lossless re-import (stripped by default).'),

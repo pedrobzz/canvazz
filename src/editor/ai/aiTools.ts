@@ -114,6 +114,15 @@ function requireNode(id: NodeId): NodeModel {
   return node
 }
 
+/**
+ * The node-reference argument under whichever alias the caller used. The tool
+ * surface has historically named it id/nodeId/targetId in different places, so
+ * single-node tools accept any of them rather than silently ignoring a near-miss.
+ */
+function refId(args: Json): string | undefined {
+  return (args.id ?? args.nodeId ?? args.targetId) as string | undefined
+}
+
 function treeSummary(id: NodeId, depth: number, maxDepth: number): string[] {
   const node = store.doc.nodes[id]
   if (!node) return []
@@ -269,12 +278,12 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   get_children(args) {
-    const node = requireNode(args.id as string)
+    const node = requireNode(refId(args) as string)
     return { id: node.id, children: node.children.map(summarize) }
   },
 
   get_node_info(args) {
-    const node = requireNode(args.id as string)
+    const node = requireNode(refId(args) as string)
     // An instance derives its subtree from the component definition, so
     // node.children is empty. Resolve it and surface the overridable slots —
     // the `sourceId`s that set_instance_overrides keys on — so callers don't
@@ -290,14 +299,14 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   async get_html(args) {
-    const id = args.id as string
+    const id = refId(args) as string
     requireNode(id)
     await ensureIconRegistries() // icon overrides export exact glyph content
     return { html: exportHtml(store.doc, id) }
   },
 
   async get_jsx(args) {
-    const id = args.id as string
+    const id = refId(args) as string
     requireNode(id)
     await ensureIconRegistries()
     // Production JSX: real components, camelCase SVG attrs, no data-cz-* unless asked.
@@ -305,7 +314,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   get_computed_styles(args) {
-    const id = args.id as string
+    const id = refId(args) as string
     requireNode(id)
     const w = world()
     const el = w ? nodeElement(w, id) : null
@@ -332,7 +341,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   async get_screenshot(args) {
-    const id = args.id as string | undefined
+    const id = refId(args) as string | undefined
     const w = world()
     if (!w) throw new Error('Canvas not mounted')
     let el: HTMLElement | null
@@ -557,7 +566,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   set_classes(args) {
-    const id = args.id as string
+    const id = refId(args) as string
     requireNode(id)
     const classes = sanitizeClasses(String(args.classes ?? ''))
     store.apply('AI: set classes', [{ t: 'setClasses', id, classes }], 'ai')
@@ -565,7 +574,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   set_text_content(args) {
-    const id = args.id as string
+    const id = refId(args) as string
     requireNode(id)
     setTextContent({ ...AI }, id, String(args.text ?? ''))
     return mutationResult('set_text_content', [id])
@@ -651,7 +660,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   create_component(args) {
-    const id = args.nodeId as string
+    const id = (args.nodeId ?? args.id ?? args.targetId) as string
     requireNode(id)
     const created = createMainComponent({ ...AI }, [id])
     if (!created) throw new Error('Cannot create a component from this node (already a component/instance/artboard?)')
@@ -880,7 +889,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   set_tokens(args) {
-    const set = args.set as Record<string, string | null>
+    const set = (args.set ?? args.tokens) as Record<string, string | null>
     if (!set || Object.keys(set).length === 0) throw new Error('set{} is required')
     const ops: Op[] = []
     const rejected: string[] = []
@@ -977,7 +986,7 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   async export(args) {
-    const id = args.id as string
+    const id = refId(args) as string
     requireNode(id)
     await ensureIconRegistries()
     const format = (args.format as string | undefined) ?? 'html'
