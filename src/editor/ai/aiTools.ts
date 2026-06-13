@@ -781,6 +781,11 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     // parseHtml dedups against existing ids; track ids minted earlier in this
     // same batch too so two glyphs never collide before they are applied.
     const pending = new Set<string>()
+    // The ops apply in order, so two appends into the same container would both
+    // resolve to today's children.length and the second would insert before the
+    // first — reversing the batch. Track how many we've queued per target and
+    // offset each subsequent append so array order = layout order.
+    const queued = new Map<string, number>()
 
     for (const item of items) {
       const at = locationFor(item.targetId, item.index)
@@ -811,6 +816,13 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       }
       const tree = collectFrom(nodes, rootId)
       for (const n of tree) pending.add(n.id)
+      // Append in array order: bump the index for repeat appends into one target.
+      if (item.index === undefined) {
+        const key = at.kind === 'node' ? at.parent : `page:${at.pageId}`
+        const offset = queued.get(key) ?? 0
+        at.index = (at.index ?? 0) + offset
+        queued.set(key, offset + 1)
+      }
       ops.push({ t: 'insertTree', nodes: tree, rootId, at })
       createdIds.push(rootId)
       results.push({ name: item.name, ok: true, id: rootId })
