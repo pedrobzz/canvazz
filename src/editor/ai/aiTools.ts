@@ -15,6 +15,7 @@ import {
 } from '../components/componentCommands'
 import { sfSymbolMarkup } from '@/components/SFSymbol'
 import { ensureIconRegistries } from '../iconResolver'
+import { closestIconNames, iconNames, scoreIcons } from '../iconResolver'
 import { DEFAULT_WEIGHTS, isSystemFont, isValidFamily, SYSTEM_FONTS, syncDocumentFonts, verifyFontLoaded } from '../fonts'
 import { genId } from '../model/ids'
 import { createArtboard } from '../model/factory'
@@ -224,19 +225,59 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       el = firstArtboard ? nodeElement(w, firstArtboard) : null
     }
     if (!el) throw new Error('Nothing to screenshot — create an artboard first.')
-    const maxSize = 1200
-    const scale = Math.min(1, maxSize / Math.max(el.offsetWidth, el.offsetHeight, 1))
-    // The clone keeps the node's canvas placement (absolute left/top), which
-    // shifts content outside the capture viewport — zero it out. Downscale
-    // via canvas dimensions; pixelRatio < 1 renders blank in html-to-image.
-    const dataUrl = await toPng(el, {
+
+    const fullW = el.offsetWidth
+    const fullH = el.offsetHeight
+    // Crop region (node-relative px) clamped into the node box. Default: whole node.
+    const region = clampRegion(args.region as Json | undefined, fullW, fullH)
+    const maxEdge = Math.max(1, Math.min(4096, Number(args.maxEdge) || 1200))
+    // scale, if given, is honored up to the maxEdge ceiling; otherwise we
+    // downscale only when the long edge exceeds maxEdge (1:1 below that).
+    const requested = Number(args.scale)
+    const fit = Math.min(1, maxEdge / Math.max(region.width, region.height, 1))
+    const scale = requested > 0 ? Math.min(requested, fit) : fit
+
+    const warnings: string[] = []
+    const bg = effectiveBackground(el, warnings)
+    // Capture the full node at the target scale, then crop to the region.
+    // Neutralize the node's canvas placement (absolute left/top) WITHOUT
+    // forcing `static`: static stops the node being a containing block, so an
+    // absolutely-positioned child (a hero <h1>) re-anchors to an outer ancestor
+    // and vanishes from the box. `relative` with zero offsets renders at the
+    // same origin yet still contains abs children. `flow-root` adds a block
+    // formatting context so a plain block's child top-margin can't collapse out
+    // of the box and clip. pixelRatio < 1 renders blank, so downscale via the
+    // canvas dimensions.
+    const style: Record<string, string> = {
+      transform: 'none', rotate: 'none', position: 'relative', left: '0px', top: '0px', margin: '0',
+    }
+    const display = getComputedStyle(el).display
+    if (display === 'block' || display === 'inline-block' || display === 'inline') {
+      style.display = 'flow-root'
+    }
+    if (bg.image) style.backgroundImage = bg.image
+    const dataUrlFull = await toPng(el, {
       pixelRatio: 1,
-      canvasWidth: Math.round(el.offsetWidth * scale),
-      canvasHeight: Math.round(el.offsetHeight * scale),
+      canvasWidth: Math.round(fullW * scale),
+      canvasHeight: Math.round(fullH * scale),
       skipFonts: true,
-      style: { transform: 'none', rotate: 'none', position: 'static', left: '0px', top: '0px', margin: '0' },
+      backgroundColor: bg.color,
+      style,
     })
-    return { dataUrl, width: el.offsetWidth, height: el.offsetHeight }
+
+    const cropped =
+      region.x === 0 && region.y === 0 && region.width === fullW && region.height === fullH
+        ? { dataUrl: dataUrlFull, width: Math.round(fullW * scale), height: Math.round(fullH * scale) }
+        : await cropDataUrl(dataUrlFull, region, scale)
+
+    return {
+      dataUrl: cropped.dataUrl,
+      width: cropped.width,
+      height: cropped.height,
+      capturedRect: region,
+      scale: Math.round(scale * 1000) / 1000,
+      ...(warnings.length ? { warnings } : {}),
+    }
   },
 
   // --- Mutations -----------------------------------------------------------
@@ -535,28 +576,68 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
   },
 
   async insert_icon(args) {
-    const name = String(args.name ?? '').trim()
-    if (!name) throw new Error('name is required (Apple SF Symbol name, e.g. "heart.fill")')
+    // One item per icon, normalized from either the array form or the legacy
+    // single-icon args. The whole batch lands in one undoable transaction.
     const variant = args.variant === 'dualtone' ? 'dualtone' : 'monochrome'
-    const size = Math.max(8, Math.min(512, Number(args.size) || 24))
-    const style: Record<string, string> = {}
-    if (args.x !== undefined || args.y !== undefined) {
-      style.position = 'absolute'
-      style.left = `${Number(args.x) || 0}px`
-      style.top = `${Number(args.y) || 0}px`
+    const items: IconRequest[] = Array.isArray(args.icons)
+      ? (args.icons as Json[]).map((it) => normalizeIconRequest(it, args))
+      : [normalizeIconRequest(args, args)]
+    if (items.length === 0) throw new Error('Provide an icon name or a non-empty icons[] array.')
+    if (items.some((it) => !it.name)) {
+      throw new Error('Every icon needs a name (Apple SF Symbol name, e.g. "heart.fill").')
     }
-    if (args.color) style.color = String(args.color)
-    const markup = await sfSymbolMarkup(name, { variant, size, style })
-    if (!markup) {
-      throw new Error(
-        `Unknown SF Symbol: "${name}". Use Apple names like "heart.fill", "pills.fill", "cross.case", "lungs.fill".`,
-      )
+
+    const results: Array<{ name: string; ok: boolean; id?: NodeId; error?: string }> = []
+    const ops: Op[] = []
+    const createdIds: NodeId[] = []
+    // parseHtml dedups against existing ids; track ids minted earlier in this
+    // same batch too so two glyphs never collide before they are applied.
+    const pending = new Set<string>()
+
+    for (const item of items) {
+      const at = locationFor(item.targetId, item.index)
+      const style: Record<string, string> = {}
+      if (item.x !== undefined || item.y !== undefined) {
+        style.position = 'absolute'
+        style.left = `${item.x ?? 0}px`
+        style.top = `${item.y ?? 0}px`
+      }
+      if (item.color) style.color = item.color
+      const markup = await sfSymbolMarkup(item.name, { variant, size: item.size, style })
+      if (!markup) {
+        const closest = await closestIconNames(item.name, variant, 5)
+        results.push({
+          name: item.name,
+          ok: false,
+          error: `Unknown SF Symbol "${item.name}"${closest.length ? ` — closest: ${closest.join(', ')}` : ''}`,
+        })
+        continue
+      }
+      const { nodes, rootIds, dropped } = parseHtml(markup, {
+        isIdTaken: (pid) => Boolean(store.doc.nodes[pid]) || pending.has(pid),
+      })
+      const rootId = rootIds[0]
+      if (!rootId) {
+        results.push({ name: item.name, ok: false, error: `Icon markup rejected: ${dropped.join(', ')}` })
+        continue
+      }
+      const tree = collectFrom(nodes, rootId)
+      for (const n of tree) pending.add(n.id)
+      ops.push({ t: 'insertTree', nodes: tree, rootId, at })
+      createdIds.push(rootId)
+      results.push({ name: item.name, ok: true, id: rootId })
     }
-    const at = locationFor(args.targetId as string | undefined, args.index as number | undefined)
-    const { rootIds, dropped } = insertHtml({ ...AI }, markup, at, `AI: insert icon ${name}`)
-    if (rootIds.length === 0) throw new Error(`Icon markup rejected: ${dropped.join(', ')}`)
-    store.setSelection(rootIds)
-    return { ...mutationResult('insert_icon', rootIds), symbol: name, dropped }
+
+    if (ops.length === 0) {
+      const errors = results.map((r) => r.error).filter(Boolean).join('; ')
+      throw new Error(errors || 'No icons could be inserted.')
+    }
+    const label = createdIds.length === 1
+      ? `AI: insert icon ${results.find((r) => r.ok)?.name}`
+      : `AI: insert ${createdIds.length} icons`
+    store.apply(label, ops, 'ai')
+    store.setSelection(createdIds)
+    return { ...mutationResult('insert_icon', createdIds), variant, createdIds, icons: results }
   },
 
   create_page(args) {
@@ -707,6 +788,170 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
       nodeCount: Object.keys(store.doc.nodes).length,
     }
   },
+
+  async search_icons(args) {
+    const query = String(args.query ?? '').trim()
+    if (!query) throw new Error('query is required (e.g. "document", "arrow up", "trash")')
+    const variant = args.variant === 'dualtone' ? 'dualtone' : 'monochrome'
+    const limit = Math.max(1, Math.min(50, Number(args.limit) || 12))
+    const names = await iconNames(variant)
+    const matches = scoreIcons(query, names, limit)
+    return {
+      query,
+      variant,
+      count: matches.length,
+      matches,
+      hint: matches.length === 0
+        ? 'No matches — try a broader single word (the registry uses Apple names like "doc", "tray", "person").'
+        : 'Pass any name to insert_icon. Names are exact Apple SF Symbol names.',
+    }
+  },
+}
+
+export interface CaptureRegion {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * Clamp a requested node-relative crop into the node box. A missing or empty
+ * region means "the whole node". Out-of-range values are pulled back in rather
+ * than rejected so a slightly-off band request still returns pixels.
+ */
+export function clampRegion(
+  region: { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | undefined,
+  fullW: number,
+  fullH: number,
+): CaptureRegion {
+  if (!region || (region.x === undefined && region.y === undefined && region.width === undefined && region.height === undefined)) {
+    return { x: 0, y: 0, width: fullW, height: fullH }
+  }
+  const x = Math.max(0, Math.min(Math.round(Number(region.x) || 0), Math.max(0, fullW - 1)))
+  const y = Math.max(0, Math.min(Math.round(Number(region.y) || 0), Math.max(0, fullH - 1)))
+  const wReq = region.width === undefined ? fullW - x : Math.round(Number(region.width) || 0)
+  const hReq = region.height === undefined ? fullH - y : Math.round(Number(region.height) || 0)
+  const width = Math.max(1, Math.min(wReq, fullW - x))
+  const height = Math.max(1, Math.min(hReq, fullH - y))
+  return { x, y, width, height }
+}
+
+export interface BgLayer {
+  backgroundColor: string
+  backgroundImage: string
+  /** True for the captured node's own styles (index 0). */
+  own?: boolean
+  /** True once we have reached the artboard — the walk stops after it. */
+  isArtboard?: boolean
+}
+
+export interface EffectiveBackground {
+  color?: string
+  image?: string
+  warnings: string[]
+}
+
+const bgTransparent = (c: string) => !c || c === 'transparent' || c === 'rgba(0, 0, 0, 0)'
+const bgPainted = (img: string) => Boolean(img) && img !== 'none'
+
+/**
+ * Pure resolver: given the captured node's styles followed by its ancestors'
+ * (nearest first, ending at the artboard), pick the background it visually
+ * renders on. Node shots otherwise drop ancestor backgrounds (a hero inner div
+ * captured on white because the gradient lives on the parent section). Take the
+ * nearest painted color and, if the node has no image of its own, the nearest
+ * ancestor image — which is positioned against that ancestor's geometry, so it
+ * can only be approximated under a child; warn when that happens.
+ */
+export function resolveBackgroundLayers(layers: BgLayer[]): EffectiveBackground {
+  const out: EffectiveBackground = { warnings: [] }
+  const ownImage = layers[0] && bgPainted(layers[0].backgroundImage)
+  for (let i = 0; i < layers.length; i++) {
+    const layer = layers[i]
+    if (!out.color && !bgTransparent(layer.backgroundColor)) out.color = layer.backgroundColor
+    if (!ownImage && !out.image && i > 0 && bgPainted(layer.backgroundImage)) {
+      out.image = layer.backgroundImage
+      out.warnings.push(
+        'ancestor background image/gradient approximated (positioned against the ancestor, not this node)',
+      )
+    }
+    if (out.color && (out.image || ownImage)) break
+    if (layer.isArtboard) break
+  }
+  return out
+}
+
+/** Collect the node's and ancestors' background styles, up to the artboard. */
+function backgroundLayers(el: HTMLElement): BgLayer[] {
+  const layers: BgLayer[] = []
+  const own = getComputedStyle(el)
+  layers.push({ backgroundColor: own.backgroundColor, backgroundImage: own.backgroundImage, own: true })
+  let node = el.parentElement
+  while (node && node.dataset.canvasWorld === undefined) {
+    const cs = getComputedStyle(node)
+    const isArtboard = Boolean(node.dataset.nodeId && store.doc.nodes[node.dataset.nodeId]?.isArtboard)
+    layers.push({ backgroundColor: cs.backgroundColor, backgroundImage: cs.backgroundImage, isArtboard })
+    if (isArtboard) break
+    node = node.parentElement
+  }
+  return layers
+}
+
+/** The background a node visually renders on, composited from its ancestors. */
+function effectiveBackground(el: HTMLElement, warnings: string[]): { color?: string; image?: string } {
+  const resolved = resolveBackgroundLayers(backgroundLayers(el))
+  warnings.push(...resolved.warnings)
+  return { color: resolved.color, image: resolved.image }
+}
+
+/** Crop a full-node PNG to a node-relative region (already in scaled px). */
+async function cropDataUrl(
+  dataUrl: string,
+  region: CaptureRegion,
+  scale: number,
+): Promise<{ dataUrl: string; width: number; height: number }> {
+  const img = new Image()
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve()
+    img.onerror = () => reject(new Error('Failed to decode capture for cropping'))
+    img.src = dataUrl
+  })
+  const sx = Math.round(region.x * scale)
+  const sy = Math.round(region.y * scale)
+  const sw = Math.max(1, Math.round(region.width * scale))
+  const sh = Math.max(1, Math.round(region.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = sw
+  canvas.height = sh
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('2D canvas unavailable for cropping')
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
+  return { dataUrl: canvas.toDataURL('image/png'), width: sw, height: sh }
+}
+
+interface IconRequest {
+  name: string
+  targetId?: string
+  size: number
+  color?: string
+  x?: number
+  y?: number
+  index?: number
+}
+
+/** Normalize one icon spec, falling back to batch-level defaults. */
+function normalizeIconRequest(it: Json, defaults: Json): IconRequest {
+  const sizeRaw = it.size ?? defaults.size
+  return {
+    name: String(it.name ?? '').trim(),
+    targetId: (it.targetId ?? defaults.targetId) as string | undefined,
+    size: Math.max(8, Math.min(512, Number(sizeRaw) || 24)),
+    color: it.color !== undefined ? String(it.color) : undefined,
+    x: it.x !== undefined ? Number(it.x) || 0 : undefined,
+    y: it.y !== undefined ? Number(it.y) || 0 : undefined,
+    index: it.index !== undefined ? Number(it.index) : undefined,
+  }
 }
 
 function collectFrom(nodes: NodeModel[], rootId: string): NodeModel[] {
