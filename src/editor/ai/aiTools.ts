@@ -276,12 +276,21 @@ export const aiToolExecutors: Record<string, (args: Json) => Promise<Json> | Jso
     const el = w ? nodeElement(w, id) : null
     if (!el) throw new Error(`Node ${id} is not rendered (hidden ancestor or wrong page).`)
     const cs = getComputedStyle(el)
-    const props = (args.properties as string[] | undefined) ?? [
+    const defaults = [
       'display', 'position', 'width', 'height', 'padding', 'margin', 'gap',
       'flex-direction', 'align-items', 'justify-content', 'font-size', 'font-weight',
       'line-height', 'color', 'background-color', 'border-radius', 'border',
       'box-shadow', 'opacity', 'overflow', 'transform',
     ]
+    // SVG nodes (icons, chart lines/arcs) paint via fill/stroke, not
+    // background/color — surface those so callers can verify vector color.
+    if (el instanceof SVGElement) {
+      defaults.push(
+        'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
+        'stroke-dasharray', 'stroke-dashoffset', 'fill-opacity', 'stroke-opacity', 'paint-order',
+      )
+    }
+    const props = (args.properties as string[] | undefined) ?? defaults
     const styles: Record<string, string> = {}
     for (const p of props) styles[p] = cs.getPropertyValue(p)
     return { id, rect: rectOf(id), computed: styles }
